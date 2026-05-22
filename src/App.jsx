@@ -405,7 +405,7 @@ function HomeScreen({ userName, contacts, onNew, onQuick, onContactTap }) {
 
       {/* Actions */}
       <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={onNew} style={{ flex: 2, background: "linear-gradient(135deg,#7C3AED,#4F46E5)", color: "#fff", border: "none", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>+ División</button>
+        <button onClick={onNew} style={{ flex: 1, background: "linear-gradient(135deg,#7C3AED,#4F46E5)", color: "#fff", border: "none", borderRadius: 12, padding: "12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>🧾 Dividir cuenta</button>
         <button onClick={() => onQuick("credit")} style={{ flex: 1, background: "#34D39922", color: "#34D399", border: "1px solid #34D39944", borderRadius: 12, padding: "12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>⚡ Me deben</button>
         <button onClick={() => onQuick("debt")} style={{ flex: 1, background: "#F8717122", color: "#F87171", border: "1px solid #F8717144", borderRadius: 12, padding: "12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>⚡ Yo debo</button>
       </div>
