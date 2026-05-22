@@ -1,341 +1,480 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 
-// ── Configura tu URL de Vercel aquí ──────────────────────────────────────────
-const BACKEND_URL = "TU_BACKEND_URL"; // ej: https://splitcl-backend-xyz.vercel.app
-
-// ── Compresión de imagen ──────────────────────────────────────────────────────
-function compressImage(file, maxPx = 800, quality = 0.65) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(img.width * scale);
-      canvas.height = Math.round(img.height * scale);
-      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-      URL.revokeObjectURL(url);
-      const dataUrl = canvas.toDataURL("image/jpeg", quality);
-      resolve({ base64: dataUrl.split(",")[1], dataUrl });
-    };
-    img.src = url;
-  });
-}
-
-const SCAN_STEPS = ["Comprimiendo imagen...", "Enviando boleta...", "Extrayendo ítems...", "¡Listo!"];
-
-const fmt = (n) =>
-  new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(n);
+const fmt = (n) => new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(Math.abs(n));
 const uid = () => Math.random().toString(36).slice(2, 8);
 const COLORS = ["#A78BFA","#34D399","#F472B6","#60A5FA","#FBBF24","#F87171","#38BDF8","#FB923C"];
+const BANCOS = ["BancoEstado","Santander","Banco de Chile","BCI","Scotiabank","Itaú","Falabella","BICE","Security","Otro"];
+const TIPOS = ["Cuenta Corriente","Cuenta Vista","Cuenta RUT","Cuenta de Ahorro"];
+const DAYS_30 = 30 * 24 * 60 * 60 * 1000;
 
-// ── UI Atoms ─────────────────────────────────────────────────────────────────
+const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
+const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+
+const purgeContacts = (contacts) => {
+  const now = Date.now();
+  return contacts.filter(c => c.balance !== 0 || !c.settledAt || (now - c.settledAt) < DAYS_30);
+};
+
 function Avatar({ name, color, size = 36 }) {
   return (
-    <div style={{
-      width: size, height: size, borderRadius: "50%",
-      background: `${color}33`, border: `2px solid ${color}`,
-      display: "flex", alignItems: "center", justifyContent: "center",
-      fontSize: size * 0.38, fontWeight: 800, color, flexShrink: 0
-    }}>{name.charAt(0).toUpperCase()}</div>
+    <div style={{ width: size, height: size, borderRadius: "50%", background: `${color}22`, border: `1.5px solid ${color}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: size * 0.38, fontWeight: 700, color, flexShrink: 0 }}>
+      {name.charAt(0).toUpperCase()}
+    </div>
+  );
+}
+
+function GradBtn({ children, onClick, disabled = false, color = "purple", small = false }) {
+  const bgs = { purple: "linear-gradient(135deg,#7C3AED,#4F46E5)", green: "linear-gradient(135deg,#059669,#10b981)", red: "linear-gradient(135deg,#dc2626,#f87171)", amber: "linear-gradient(135deg,#d97706,#fbbf24)" };
+  return (
+    <button onClick={onClick} disabled={disabled} style={{ width: "100%", padding: small ? "10px" : "14px", borderRadius: 12, border: "none", background: disabled ? "#1a1730" : bgs[color], color: disabled ? "#444" : color === "amber" ? "#0d0b1a" : "#fff", fontSize: small ? 13 : 15, fontWeight: 700, cursor: disabled ? "not-allowed" : "pointer" }}>
+      {children}
+    </button>
   );
 }
 
 function Card({ children, style = {} }) {
-  return (
-    <div style={{
-      background: "rgba(255,255,255,0.05)", borderRadius: 20,
-      border: "1px solid rgba(255,255,255,0.08)", padding: 20,
-      backdropFilter: "blur(10px)", ...style
-    }}>{children}</div>
-  );
+  return <div style={{ background: "rgba(255,255,255,0.04)", borderRadius: 14, border: "1px solid rgba(255,255,255,0.07)", padding: 14, ...style }}>{children}</div>;
 }
 
-function GradBtn({ children, onClick, style = {}, disabled = false }) {
-  return (
-    <button onClick={onClick} disabled={disabled} style={{
-      width: "100%", padding: "16px", borderRadius: 16, border: "none",
-      background: disabled ? "#333" : "linear-gradient(135deg, #7C3AED, #4F46E5)",
-      color: disabled ? "#666" : "#fff", fontSize: 16, fontWeight: 800,
-      cursor: disabled ? "not-allowed" : "pointer", letterSpacing: -0.3,
-      boxShadow: disabled ? "none" : "0 4px 24px #7C3AED55", ...style
-    }}>{children}</button>
-  );
+function Label({ children }) {
+  return <p style={{ color: "#555", fontSize: 10, fontWeight: 700, letterSpacing: 1, margin: "0 0 8px", textTransform: "uppercase" }}>{children}</p>;
 }
 
-// ── SCREEN: Home ─────────────────────────────────────────────────────────────
-function HomeScreen({ onNew }) {
+// ── Premium Modal ─────────────────────────────────────────────────────────────
+function PremiumModal({ onClose }) {
+  const [joined, setJoined] = useState(() => load("splitcl_premium_interest", false));
+  const join = () => { save("splitcl_premium_interest", true); setJoined(true); };
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: 28 }}>
-      {/* Header */}
-      <div style={{ marginBottom: 32 }}>
-        <p style={{ color: "#A78BFA", fontSize: 13, fontWeight: 600, margin: 0, letterSpacing: 1 }}>SPLITCL</p>
-        <h1 style={{ fontSize: 32, fontWeight: 900, margin: "4px 0 0", letterSpacing: -1.5, lineHeight: 1.1 }}>
-          Divide la cuenta<br /><span style={{ color: "#A78BFA" }}>sin drama</span>
-        </h1>
-      </div>
-
-      {/* Wallet card */}
-      <Card style={{ marginBottom: 16, background: "linear-gradient(135deg, #4C1D95, #312e81)", border: "none" }}>
-        <p style={{ color: "#C4B5FD", fontSize: 12, fontWeight: 600, margin: "0 0 4px", letterSpacing: 1 }}>WALLET</p>
-        <p style={{ color: "#fff", fontSize: 13, margin: 0 }}>Tu saldo pendiente</p>
-        <p style={{ fontSize: 38, fontWeight: 900, margin: "8px 0", color: "#A78BFA", letterSpacing: -1 }}>{fmt(0)}</p>
-        <div style={{ display: "flex", gap: 8 }}>
-          <div style={{ flex: 1, background: "rgba(255,255,255,0.1)", borderRadius: 10, padding: "8px 12px", textAlign: "center", fontSize: 12, color: "#C4B5FD", fontWeight: 600 }}>⇄ Transferir</div>
-          <div style={{ flex: 1, background: "rgba(255,255,255,0.1)", borderRadius: 10, padding: "8px 12px", textAlign: "center", fontSize: 12, color: "#C4B5FD", fontWeight: 600 }}>≡ Historial</div>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 1000, display: "flex", alignItems: "flex-end", justifyContent: "center", padding: 16 }}>
+      <div style={{ background: "#0f0d1f", borderRadius: 20, padding: 24, width: "100%", maxWidth: 430, border: "1px solid #3d3570" }}>
+        <div style={{ textAlign: "center", marginBottom: 20 }}>
+          <div style={{ fontSize: 44, marginBottom: 8 }}>📸</div>
+          <h2 style={{ color: "#fff", fontSize: 22, fontWeight: 900, margin: "0 0 8px", letterSpacing: -0.5 }}>Escaneo de boleta</h2>
+          <p style={{ color: "#555", fontSize: 14, margin: 0 }}>Feature exclusiva de SplitCL Premium</p>
         </div>
-      </Card>
-
-      <div style={{ flex: 1 }} />
-
-      <GradBtn onClick={onNew}>
-        + Nueva división
-      </GradBtn>
-      <p style={{ textAlign: "center", color: "#555", fontSize: 12, marginTop: 12 }}>
-        Sube la foto al chat → yo extraigo los ítems → pegalos aquí
-      </p>
-    </div>
-  );
-}
-
-// ── SCREEN: People ────────────────────────────────────────────────────────────
-function PeopleScreen({ people, setPeople, onNext }) {
-  const [name, setName] = useState("");
-  const add = () => {
-    const t = name.trim();
-    if (!t || people.find(p => p.name.toLowerCase() === t.toLowerCase())) return;
-    setPeople(prev => [...prev, { id: uid(), name: t, color: COLORS[prev.length % COLORS.length] }]);
-    setName("");
-  };
-  return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: 24, gap: 20 }}>
-      <div>
-        <p style={{ color: "#A78BFA", fontSize: 12, fontWeight: 700, margin: 0, letterSpacing: 1 }}>PASO 1 DE 3</p>
-        <h2 style={{ margin: "4px 0 0", fontSize: 28, fontWeight: 900, letterSpacing: -1 }}>¿Quiénes van?</h2>
-        <p style={{ color: "#666", margin: "4px 0 0", fontSize: 14 }}>Agrega a todos del grupo</p>
-      </div>
-      <div style={{ display: "flex", gap: 10 }}>
-        <input value={name} onChange={e => setName(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && add()} placeholder="Nombre..."
-          style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14, padding: "13px 16px", color: "#fff", fontSize: 15, outline: "none" }}
-        />
-        <button onClick={add} style={{ background: "linear-gradient(135deg,#7C3AED,#4F46E5)", color: "#fff", border: "none", borderRadius: 14, padding: "13px 20px", fontWeight: 800, fontSize: 18, cursor: "pointer" }}>+</button>
-      </div>
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10, overflowY: "auto" }}>
-        {people.map(p => (
-          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, background: `${p.color}11`, borderRadius: 16, padding: "12px 16px", border: `1px solid ${p.color}33` }}>
-            <Avatar name={p.name} color={p.color} />
-            <span style={{ flex: 1, fontWeight: 700, fontSize: 15 }}>{p.name}</span>
-            <button onClick={() => setPeople(prev => prev.filter(x => x.id !== p.id))} style={{ background: "none", border: "none", color: "#F87171", cursor: "pointer", fontSize: 18 }}>✕</button>
-          </div>
-        ))}
-      </div>
-      <GradBtn onClick={onNext} disabled={people.length < 2}>
-        Continuar con {people.length} {people.length === 1 ? "persona" : "personas"} →
-      </GradBtn>
-    </div>
-  );
-}
-
-// ── ScanZone Component ───────────────────────────────────────────────────────
-function ScanZone({ people, setItems, setLocalName }) {
-  const [scanning, setScanning] = useState(false);
-  const [step, setStep] = useState(0);
-  const [preview, setPreview] = useState(null);
-  const [error, setError] = useState(null);
-  const fileRef = useRef();
-  const timerRef = useRef();
-
-  const startSteps = () => {
-    let i = 0;
-    setStep(0);
-    timerRef.current = setInterval(() => {
-      i = Math.min(i + 1, SCAN_STEPS.length - 2);
-      setStep(i);
-    }, 2000);
-  };
-
-  const handleFile = async (file) => {
-    if (!file) return;
-    setError(null);
-    setScanning(true);
-    startSteps();
-    try {
-      const { base64, dataUrl } = await compressImage(file);
-      setPreview(dataUrl);
-      const res = await fetch(`${BACKEND_URL}/api/scan`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: base64, mediaType: "image/jpeg" }),
-      });
-      clearInterval(timerRef.current);
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setStep(3);
-      if (data.local) setLocalName(data.local);
-      if (data.items?.length) {
-        setItems(data.items.map(it => ({ id: Math.random().toString(36).slice(2,8), name: it.name, price: Number(it.price) || 0, claimedBy: [] })));
-      }
-    } catch (e) {
-      clearInterval(timerRef.current);
-      setError("No pude leer la boleta. Agrega los ítems manualmente.");
-    }
-    setScanning(false);
-  };
-
-  return (
-    <div>
-      <div onClick={() => !scanning && fileRef.current?.click()} style={{
-        border: `2px dashed ${scanning ? "#7C3AED" : "#7C3AED55"}`,
-        borderRadius: 16, padding: 20, textAlign: "center", cursor: scanning ? "default" : "pointer",
-        background: "rgba(124,58,237,0.06)", position: "relative", minHeight: 90,
-        display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8
-      }}>
-        {preview && !scanning && (
-          <img src={preview} alt="boleta" style={{ maxHeight: 80, borderRadius: 8, objectFit: "contain" }} />
-        )}
-        {!preview && !scanning && (
-          <>
-            <span style={{ fontSize: 32 }}>📸</span>
-            <span style={{ color: "#A78BFA", fontWeight: 700, fontSize: 14 }}>Fotografiar boleta</span>
-            <span style={{ color: "#555", fontSize: 11 }}>Cámara o galería · OCR automático</span>
-          </>
-        )}
-        {scanning && (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 32, height: 32, border: "3px solid #7C3AED", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-            <span style={{ color: "#A78BFA", fontSize: 14, fontWeight: 700 }}>{SCAN_STEPS[step]}</span>
-            <div style={{ width: 160, height: 4, background: "#ffffff11", borderRadius: 99 }}>
-              <div style={{ height: "100%", borderRadius: 99, background: "linear-gradient(90deg,#7C3AED,#4F46E5)", width: `${((step + 1) / SCAN_STEPS.length) * 100}%`, transition: "width 0.5s ease" }} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
+          {["📷 Fotografía la boleta y la app la lee sola","⚡ Extrae ítems y precios en segundos","🇨🇱 Optimizado para boletas chilenas","✨ Más features premium próximamente"].map(f => (
+            <div key={f} style={{ display: "flex", alignItems: "center", gap: 10, background: "#1a1730", borderRadius: 10, padding: "10px 14px" }}>
+              <span style={{ fontSize: 16 }}>{f.slice(0,2)}</span>
+              <span style={{ color: "#aaa", fontSize: 13 }}>{f.slice(2)}</span>
             </div>
+          ))}
+        </div>
+        <div style={{ background: "#1a1730", borderRadius: 12, padding: "12px 16px", textAlign: "center", marginBottom: 16, border: "1px solid #7C3AED44" }}>
+          <p style={{ color: "#A78BFA", fontSize: 28, fontWeight: 900, margin: "0 0 2px", letterSpacing: -1 }}>$2.990</p>
+          <p style={{ color: "#555", fontSize: 12, margin: 0 }}>al mes · cancela cuando quieras</p>
+        </div>
+        {joined ? (
+          <div style={{ background: "#34D39922", border: "1px solid #34D39944", borderRadius: 12, padding: "12px", textAlign: "center", marginBottom: 10 }}>
+            <p style={{ color: "#34D399", fontSize: 14, fontWeight: 700, margin: 0 }}>✓ Te avisamos cuando esté disponible</p>
           </div>
+        ) : (
+          <GradBtn onClick={join}>Quiero acceso · $2.990/mes</GradBtn>
         )}
+        <button onClick={onClose} style={{ width: "100%", background: "none", border: "none", color: "#555", fontSize: 14, padding: "12px", cursor: "pointer", marginTop: 6 }}>Ahora no</button>
       </div>
-      <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleFile(e.target.files[0])} />
-      {error && <p style={{ color: "#F87171", fontSize: 12, margin: "8px 0 0" }}>{error}</p>}
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
 
-// ── SCREEN: Items + Tip ───────────────────────────────────────────────────────
-function ItemsScreen({ people, items, setItems, localName, setLocalName, tip, setTip, onNext }) {
-  const [jsonInput, setJsonInput] = useState("");
-  const [jsonError, setJsonError] = useState(null);
-  const [showPaste, setShowPaste] = useState(false);
+// ── Onboarding ────────────────────────────────────────────────────────────────
+function OnboardingScreen({ onDone }) {
+  const [name, setName] = useState("");
+  const ref = useRef();
+  useEffect(() => { setTimeout(() => ref.current?.focus(), 100); }, []);
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 28, gap: 24 }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 52, marginBottom: 12 }}>👋</div>
+        <h1 style={{ color: "#fff", fontSize: 26, fontWeight: 900, margin: "0 0 8px", letterSpacing: -1 }}>Hola, ¿cómo te llamas?</h1>
+        <p style={{ color: "#555", fontSize: 14, margin: 0 }}>Para reconocerte en cada división</p>
+      </div>
+      <div style={{ width: "100%" }}>
+        <input ref={ref} value={name} onChange={e => setName(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && name.trim() && onDone(name.trim())}
+          placeholder="Tu nombre..."
+          style={{ width: "100%", background: "#1a1730", border: "1.5px solid #3d3570", borderRadius: 14, padding: "14px 16px", color: "#fff", fontSize: 16, outline: "none", boxSizing: "border-box", marginBottom: 10 }} />
+        <GradBtn onClick={() => name.trim() && onDone(name.trim())} disabled={!name.trim()}>Listo →</GradBtn>
+      </div>
+    </div>
+  );
+}
 
-  const TIP_OPTIONS = [0, 10, 15, 20];
+// ── Contact Autocomplete Input ────────────────────────────────────────────────
+function ContactInput({ contacts, value, onChange, onSelect, placeholder }) {
+  const [open, setOpen] = useState(false);
+  const suggestions = value.length >= 2 ? contacts.filter(c => c.name.toLowerCase().startsWith(value.toLowerCase())) : [];
+  return (
+    <div style={{ position: "relative" }}>
+      <input value={value} onChange={e => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder || "Nombre..."}
+        style={{ width: "100%", background: "#1a1730", border: "1.5px solid #3d3570", borderRadius: 10, padding: "11px 14px", color: "#fff", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+      {open && suggestions.length > 0 && (
+        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#1f1a3a", border: "0.5px solid #3d3570", borderRadius: "0 0 10px 10px", zIndex: 100, overflow: "hidden" }}>
+          {suggestions.map(c => (
+            <div key={c.id} onMouseDown={() => { onSelect(c); setOpen(false); }}
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", cursor: "pointer", borderBottom: "0.5px solid #2d2650" }}>
+              <Avatar name={c.name} color={c.color} size={26} />
+              <div style={{ flex: 1 }}>
+                <p style={{ color: "#fff", fontSize: 13, fontWeight: 700, margin: 0 }}>{c.name}</p>
+                <p style={{ color: c.balance > 0 ? "#34D399" : c.balance < 0 ? "#F87171" : "#555", fontSize: 10, margin: 0 }}>
+                  {c.balance > 0 ? `te debe ${fmt(c.balance)}` : c.balance < 0 ? `le debes ${fmt(c.balance)}` : "saldado"}
+                </p>
+              </div>
+              <span style={{ color: "#A78BFA", fontSize: 10 }}>contacto ✓</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
-  const parseJson = () => {
-    try {
-      const parsed = JSON.parse(jsonInput.trim());
-      if (parsed.local) setLocalName(parsed.local);
-      if (parsed.items?.length) {
-        setItems(parsed.items.map(it => ({ id: uid(), name: it.name, price: Number(it.price) || 0, claimedBy: [] })));
-        setShowPaste(false); setJsonError(null); setJsonInput("");
-      }
-    } catch { setJsonError("JSON inválido. Copia exactamente lo que te dio Claude."); }
+// ── Item Form (2-step) ────────────────────────────────────────────────────────
+function ItemForm({ onAdd, onCancel, accentColor = "#A78BFA" }) {
+  const [step, setStep] = useState("name");
+  const [name, setName] = useState("");
+  const [price, setPrice] = useState("");
+  const [tip, setTip] = useState(0);
+  const nameRef = useRef();
+  const priceRef = useRef();
+
+  useEffect(() => { if (step === "name") setTimeout(() => nameRef.current?.focus(), 50); }, [step]);
+  useEffect(() => { if (step === "price") setTimeout(() => priceRef.current?.focus(), 50); }, [step]);
+
+  const confirmName = () => { if (name.trim()) setStep("price"); };
+  const confirmPrice = () => {
+    const p = parseInt(String(price).replace(/\./g, "")) || 0;
+    if (!p) return;
+    const tipAmt = Math.round(p * tip / 100);
+    onAdd({ id: uid(), name: name.trim(), price: p, tip, total: p + tipAmt });
   };
 
-  const addItem = () => setItems(prev => [...prev, { id: uid(), name: "", price: 0, claimedBy: [] }]);
-  const update = (id, f, v) => setItems(prev => prev.map(it => it.id === id ? { ...it, [f]: v } : it));
+  if (step === "name") return (
+    <div style={{ borderRadius: 14, border: `2px solid #7C3AED`, overflow: "hidden", boxShadow: "0 0 24px #7C3AED22" }}>
+      <div style={{ background: "#1f1a3a", padding: "12px 14px", borderBottom: "0.5px solid #3d3570" }}>
+        <p style={{ color: "#A78BFA", fontSize: 10, fontWeight: 700, margin: "0 0 6px", letterSpacing: 1 }}>PASO 1 DE 2 · NOMBRE</p>
+        <input ref={nameRef} value={name} onChange={e => setName(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && confirmName()}
+          placeholder="Ej: Coca Cola, Galletas..."
+          style={{ width: "100%", background: "none", border: "none", color: "#fff", fontSize: 17, fontWeight: 600, outline: "none", padding: 0 }} />
+      </div>
+      <div style={{ background: "#17132e", padding: "8px 14px", display: "flex", justifyContent: "space-between" }}>
+        <button onClick={onCancel} style={{ background: "#F8717122", border: "1px solid #F8717144", borderRadius: 8, padding: "5px 14px", color: "#F87171", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>✕ Cancelar</button>
+        <button onClick={confirmName} disabled={!name.trim()} style={{ background: name.trim() ? "#7C3AED" : "#2d2650", border: "none", borderRadius: 8, padding: "5px 16px", color: name.trim() ? "#fff" : "#555", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Siguiente →</button>
+      </div>
+    </div>
+  );
 
-  const subtotal = items.reduce((s, it) => s + (Number(it.price) || 0), 0);
-  const tipAmount = Math.round(subtotal * tip / 100);
-  const total = subtotal + tipAmount;
+  return (
+    <div style={{ borderRadius: 14, border: "2px solid #FBBF24", overflow: "hidden", boxShadow: "0 0 24px #FBBF2422" }}>
+      <div style={{ background: "#1f1c10", padding: "12px 14px", borderBottom: "0.5px solid #3d3000" }}>
+        <p style={{ color: "#D97706", fontSize: 10, fontWeight: 700, margin: "0 0 4px", letterSpacing: 1 }}>PASO 2 DE 2 · PRECIO</p>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ color: "#FBBF24", fontSize: 22, fontWeight: 900 }}>$</span>
+          <input ref={priceRef} value={price} onChange={e => setPrice(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && confirmPrice()}
+            placeholder="0" type="number"
+            style={{ flex: 1, background: "none", border: "none", color: "#FBBF24", fontSize: 26, fontWeight: 900, outline: "none", padding: 0 }} />
+        </div>
+        <p style={{ color: "#555", fontSize: 12, margin: "4px 0 8px" }}>{name}</p>
+        <div style={{ display: "flex", gap: 6 }}>
+          {[0,10,15,20].map(t => (
+            <button key={t} onClick={() => setTip(t)} style={{ flex: 1, padding: "6px 4px", borderRadius: 8, border: "none", background: tip === t ? "#F59E0B" : "#0d0b1a", color: tip === t ? "#0d0b1a" : "#666", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>
+              {t === 0 ? "Sin" : `+${t}%`}
+            </button>
+          ))}
+        </div>
+        {tip > 0 && price && (
+          <p style={{ color: "#F59E0B", fontSize: 11, margin: "6px 0 0" }}>
+            Total con propina: {fmt(Math.round((parseInt(String(price).replace(/\./g,""))||0) * (1 + tip/100)))}
+          </p>
+        )}
+      </div>
+      <div style={{ background: "#191500", padding: "8px 14px", display: "flex", justifyContent: "space-between" }}>
+        <button onClick={() => setStep("name")} style={{ background: "#ffffff11", border: "1px solid #ffffff22", borderRadius: 8, padding: "5px 14px", color: "#aaa", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>← Nombre</button>
+        <button onClick={confirmPrice} disabled={!price} style={{ background: price ? "#FBBF24" : "#2d2a00", border: "none", borderRadius: 8, padding: "5px 16px", color: price ? "#0d0b1a" : "#555", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Listo ✓</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Quick Record Screen ───────────────────────────────────────────────────────
+function QuickScreen({ type, contacts, cuentas, setCuentas, onSave, onBack }) {
+  const [personName, setPersonName] = useState("");
+  const [selectedContact, setSelectedContact] = useState(null);
+  const [items, setItems] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [showAddCuenta, setShowAddCuenta] = useState(false);
+  const [cuentaIdx, setCuentaIdx] = useState(0);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [nuevaCuenta, setNuevaCuenta] = useState({ banco: "BancoEstado", tipo: "Cuenta Corriente", numero: "", rut: "", nombre: "" });
+
+  const isDebt = type === "debt";
+  const accentColor = isDebt ? "#F87171" : "#34D399";
+  const accentBg = isDebt ? "#F8717122" : "#34D39922";
+  const total = items.reduce((s, it) => s + it.total, 0);
+  const displayName = selectedContact?.name || personName.trim();
+  const cuenta = cuentas[cuentaIdx];
+
+  const handleSelectContact = (c) => { setSelectedContact(c); setPersonName(c.name); };
+
+  const waMsg = () => {
+    const detail = items.map(it => `• ${it.name}${it.tip > 0 ? ` (+${it.tip}% propina)` : ""}: ${fmt(it.total)}`).join("\n");
+    if (isDebt) return `Hola ${displayName}! Te debo ${fmt(total)} 🧾\n${detail}`;
+    const cuentaTxt = cuenta ? `\n\nTransfiere a:\n${cuenta.banco} · ${cuenta.tipo}\nN°: ${cuenta.numero}\nRUT: ${cuenta.rut}` : "";
+    return `Hola ${displayName}! Me debes ${fmt(total)} 🧾\n${detail}${cuentaTxt}`;
+  };
+
+  const guardarCuenta = () => {
+    if (!nuevaCuenta.numero || !nuevaCuenta.rut || !nuevaCuenta.nombre) return;
+    const updated = [...cuentas, nuevaCuenta];
+    setCuentas(updated); save("splitcl_cuentas", updated);
+    setCuentaIdx(updated.length - 1); setShowAddCuenta(false);
+    setNuevaCuenta({ banco: "BancoEstado", tipo: "Cuenta Corriente", numero: "", rut: "", nombre: "" });
+  };
+
+  const canSave = displayName && items.length > 0;
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: 24, gap: 14, overflowY: "auto" }}>
+      <div>
+        <p style={{ color: accentColor, fontSize: 11, fontWeight: 700, margin: "0 0 2px", letterSpacing: 1 }}>{isDebt ? "YO LE DEBO A..." : "ME DEBE..."}</p>
+        <h2 style={{ color: "#fff", fontSize: 24, fontWeight: 900, margin: 0, letterSpacing: -0.5 }}>{isDebt ? "Registrar deuda" : "Registrar cobro"}</h2>
+      </div>
+
+      {/* Person */}
+      <div>
+        <Label>¿Quién?</Label>
+        <ContactInput contacts={contacts} value={personName} onChange={v => { setPersonName(v); setSelectedContact(null); }} onSelect={handleSelectContact} placeholder={isDebt ? "¿A quién le debes?" : "¿Quién te debe?"} />
+        {selectedContact && (
+          <p style={{ color: accentColor, fontSize: 11, margin: "6px 0 0" }}>
+            ✓ Contacto guardado · balance actual: {selectedContact.balance > 0 ? `te debe ${fmt(selectedContact.balance)}` : selectedContact.balance < 0 ? `le debes ${fmt(Math.abs(selectedContact.balance))}` : "saldado"}
+          </p>
+        )}
+      </div>
+
+      {/* Items */}
+      <div>
+        <Label>¿Qué?</Label>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {items.map(it => (
+            <div key={it.id} style={{ background: it.tip > 0 ? "#F59E0B11" : "#1a1730", borderRadius: 12, border: `0.5px solid ${it.tip > 0 ? "#F59E0B44" : "#2d2650"}`, overflow: "hidden" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: it.tip > 0 ? "#F59E0B" : accentColor, flexShrink: 0 }} />
+                  <span style={{ color: it.tip > 0 ? "#F59E0B" : "#fff", fontSize: 13, fontWeight: 600 }}>{it.name}</span>
+                  {it.tip > 0 && <span style={{ background: "#F59E0B22", color: "#F59E0B", fontSize: 9, borderRadius: 99, padding: "1px 6px", border: "0.5px solid #F59E0B44" }}>+{it.tip}%</span>}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ color: it.tip > 0 ? "#F59E0B" : accentColor, fontSize: 13, fontWeight: 700 }}>{fmt(it.total)}</span>
+                  <button onClick={() => setItems(prev => prev.filter(x => x.id !== it.id))} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: 14 }}>✕</button>
+                </div>
+              </div>
+            </div>
+          ))}
+          {showForm ? (
+            <ItemForm onAdd={it => { setItems(prev => [...prev, it]); setShowForm(false); }} onCancel={() => setShowForm(false)} accentColor={accentColor} />
+          ) : (
+            <button onClick={() => setShowForm(true)} style={{ background: "none", border: "1px dashed #3d3570", borderRadius: 12, padding: "11px", color: "#7C6FCD", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>+ Agregar ítem</button>
+          )}
+        </div>
+      </div>
+
+      {/* Total */}
+      {items.length > 0 && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 4px", borderTop: "0.5px solid #2d2650" }}>
+          <span style={{ color: "#666", fontSize: 13 }}>Total</span>
+          <span style={{ color: accentColor, fontSize: 22, fontWeight: 900 }}>{fmt(total)}</span>
+        </div>
+      )}
+
+      {/* Cuenta (solo si me deben) */}
+      {!isDebt && canSave && (
+        <div>
+          <Label>Cobrar con cuenta</Label>
+          {cuentas.length === 0 ? (
+            <button onClick={() => setShowAddCuenta(true)} style={{ width: "100%", background: "#1a1730", border: "1px dashed #3d3570", borderRadius: 12, padding: "11px", color: "#7C6FCD", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>+ Agregar cuenta bancaria</button>
+          ) : (
+            <div>
+              <div style={{ background: "#1a1730", borderRadius: 12, padding: "11px 14px", border: "1.5px solid #7C3AED", marginBottom: 6 }}>
+                <p style={{ color: "#fff", fontSize: 13, fontWeight: 700, margin: "0 0 2px" }}>{cuenta?.banco} · {cuenta?.tipo}</p>
+                <p style={{ color: "#666", fontSize: 11, margin: 0 }}>N°: {cuenta?.numero} · RUT: {cuenta?.rut}</p>
+              </div>
+              <div style={{ background: "#1a1730", borderRadius: 12, border: "0.5px solid #2d2650", overflow: "hidden" }}>
+                <div onClick={() => setShowDropdown(!showDropdown)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 14px", cursor: "pointer" }}>
+                  <span style={{ color: "#7C6FCD", fontSize: 12 }}>Usar otra cuenta</span>
+                  <span style={{ color: "#555", fontSize: 12 }}>{showDropdown ? "▴" : "▾"}</span>
+                </div>
+                {showDropdown && (
+                  <div style={{ borderTop: "0.5px solid #2d2650" }}>
+                    {cuentas.map((c, i) => i !== cuentaIdx && (
+                      <div key={i} onClick={() => { setCuentaIdx(i); setShowDropdown(false); }} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", cursor: "pointer", borderBottom: "0.5px solid #2d2650" }}>
+                        <div style={{ width: 22, height: 22, borderRadius: 6, background: "#A78BFA22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#A78BFA", fontWeight: 700 }}>{c.banco.charAt(0)}</div>
+                        <div><p style={{ color: "#fff", fontSize: 12, fontWeight: 600, margin: 0 }}>{c.banco} · {c.tipo}</p><p style={{ color: "#555", fontSize: 11, margin: 0 }}>N°: {c.numero}</p></div>
+                      </div>
+                    ))}
+                    <div onClick={() => { setShowAddCuenta(true); setShowDropdown(false); }} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", cursor: "pointer" }}>
+                      <div style={{ width: 22, height: 22, borderRadius: 6, background: "#7C3AED22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "#A78BFA" }}>+</div>
+                      <span style={{ color: "#7C6FCD", fontSize: 12 }}>Agregar nueva cuenta</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {showAddCuenta && (
+            <div style={{ marginTop: 10 }}>
+              <Card>
+                <Label>Nueva cuenta bancaria</Label>
+                {[{ label: "Banco", key: "banco", type: "select", options: BANCOS }, { label: "Tipo", key: "tipo", type: "select", options: TIPOS }, { label: "N° cuenta", key: "numero", placeholder: "00-000-00000-00" }, { label: "RUT", key: "rut", placeholder: "12.345.678-9" }, { label: "Nombre", key: "nombre", placeholder: "Como aparece en el banco" }].map(f => (
+                  <div key={f.key} style={{ marginBottom: 8 }}>
+                    <p style={{ color: "#666", fontSize: 11, margin: "0 0 4px" }}>{f.label}</p>
+                    {f.type === "select" ? (
+                      <select value={nuevaCuenta[f.key]} onChange={e => setNuevaCuenta(n => ({ ...n, [f.key]: e.target.value }))} style={{ width: "100%", background: "#0d0b1a", border: "0.5px solid #3d3570", borderRadius: 8, padding: "8px 10px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }}>
+                        {f.options.map(o => <option key={o}>{o}</option>)}
+                      </select>
+                    ) : (
+                      <input value={nuevaCuenta[f.key]} onChange={e => setNuevaCuenta(n => ({ ...n, [f.key]: e.target.value }))} placeholder={f.placeholder} style={{ width: "100%", background: "#0d0b1a", border: "0.5px solid #3d3570", borderRadius: 8, padding: "8px 10px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+                    )}
+                  </div>
+                ))}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => setShowAddCuenta(false)} style={{ flex: 1, background: "#1a1730", border: "0.5px solid #3d3570", borderRadius: 10, padding: "9px", color: "#666", fontSize: 13, cursor: "pointer" }}>Cancelar</button>
+                  <button onClick={guardarCuenta} style={{ flex: 2, background: "linear-gradient(135deg,#7C3AED,#4F46E5)", border: "none", borderRadius: 10, padding: "9px", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Guardar →</button>
+                </div>
+              </Card>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Actions */}
+      {canSave && !showForm && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, position: "sticky", bottom: 0, paddingTop: 8, paddingBottom: 8, background: "linear-gradient(to top,#080810 70%,transparent)" }}>
+          {!isDebt && cuenta && (
+            <a href={`https://wa.me/?text=${encodeURIComponent(waMsg())}`} target="_blank" rel="noreferrer"
+              style={{ display: "block", width: "100%", background: "#25D366", borderRadius: 12, padding: "13px", color: "#fff", fontSize: 14, fontWeight: 700, textAlign: "center", textDecoration: "none", boxSizing: "border-box" }}>
+              💬 Cobrar por WhatsApp · {fmt(total)}
+            </a>
+          )}
+          <GradBtn onClick={() => onSave({ type, personName: displayName, selectedContact, items, total })} color={isDebt ? "red" : "green"}>
+            {isDebt ? `✓ Registrar · debo ${fmt(total)}` : `✓ Guardar cobro · ${fmt(total)}`}
+          </GradBtn>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Home Screen ───────────────────────────────────────────────────────────────
+function HomeScreen({ userName, contacts, onNew, onQuick, onContactTap }) {
+  const totalOwedToMe = contacts.filter(c => c.balance > 0).reduce((s, c) => s + c.balance, 0);
+  const totalIOwe = contacts.filter(c => c.balance < 0).reduce((s, c) => s + Math.abs(c.balance), 0);
+  const netBalance = totalOwedToMe - totalIOwe;
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: 24, gap: 16, overflowY: "auto" }}>
       <div>
-        <p style={{ color: "#A78BFA", fontSize: 12, fontWeight: 700, margin: 0, letterSpacing: 1 }}>PASO 2 DE 3</p>
-        <h2 style={{ margin: "4px 0 0", fontSize: 28, fontWeight: 900, letterSpacing: -1 }}>La boleta</h2>
+        <p style={{ color: "#A78BFA", fontSize: 11, fontWeight: 700, margin: "0 0 2px", letterSpacing: 1 }}>SPLITCL</p>
+        <h1 style={{ color: "#fff", fontSize: 26, fontWeight: 900, margin: 0, letterSpacing: -1 }}>Hola, {userName} 👋</h1>
       </div>
 
-      {/* JSON paste */}
-      <Card>
-        <button onClick={() => setShowPaste(!showPaste)} style={{ background: "none", border: "none", color: "#A78BFA", fontWeight: 700, fontSize: 14, cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
-          <span>🤖</span> Pegar JSON de Claude
-          <span style={{ marginLeft: "auto", fontSize: 18, color: "#555" }}>{showPaste ? "▴" : "▾"}</span>
-        </button>
-        {showPaste && (
-          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-            <textarea value={jsonInput} onChange={e => setJsonInput(e.target.value)}
-              placeholder='{"local":"Fuente Chilena","items":[{"name":"Coca Cola","price":2450}],"total":17100}'
-              rows={3}
-              style={{ width: "100%", background: "#0d0d1a", border: "1px solid #333", borderRadius: 10, padding: "10px", color: "#aaa", fontSize: 12, outline: "none", resize: "none", fontFamily: "monospace", boxSizing: "border-box" }}
-            />
-            {jsonError && <p style={{ color: "#F87171", fontSize: 12, margin: 0 }}>{jsonError}</p>}
-            <button onClick={parseJson} style={{ background: "linear-gradient(135deg,#7C3AED,#4F46E5)", color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontWeight: 800, fontSize: 14, cursor: "pointer" }}>Cargar ítems →</button>
+      {/* Balance card */}
+      <div style={{ background: netBalance >= 0 ? "linear-gradient(135deg,#0f2a1a,#0a1f14)" : "linear-gradient(135deg,#2a0f0f,#1f0a0a)", borderRadius: 16, padding: 18, border: `1px solid ${netBalance >= 0 ? "#34D39933" : "#F8717133"}` }}>
+        <p style={{ color: netBalance >= 0 ? "#34D399" : "#F87171", fontSize: 10, fontWeight: 700, margin: "0 0 4px", letterSpacing: 1 }}>BALANCE NETO</p>
+        <p style={{ color: netBalance >= 0 ? "#34D399" : "#F87171", fontSize: 36, fontWeight: 900, margin: "0 0 2px", letterSpacing: -1.5 }}>
+          {netBalance >= 0 ? "+" : "-"}{fmt(netBalance)}
+        </p>
+        <p style={{ color: netBalance >= 0 ? "#1a6b46" : "#6b1a1a", fontSize: 12, margin: "0 0 12px" }}>
+          {netBalance >= 0 ? "Te deben más de lo que debes" : "Debes más de lo que te deben"}
+        </p>
+        <div style={{ display: "flex", gap: 10, paddingTop: 10, borderTop: `0.5px solid ${netBalance >= 0 ? "#34D39922" : "#F8717122"}` }}>
+          <div style={{ flex: 1, textAlign: "center" }}>
+            <p style={{ color: "#34D399", fontSize: 15, fontWeight: 700, margin: 0 }}>{fmt(totalOwedToMe)}</p>
+            <p style={{ color: "#1a6b46", fontSize: 10, margin: "2px 0 0" }}>te deben</p>
           </div>
-        )}
-      </Card>
+          <div style={{ width: 0.5, background: "#ffffff11" }} />
+          <div style={{ flex: 1, textAlign: "center" }}>
+            <p style={{ color: "#F87171", fontSize: 15, fontWeight: 700, margin: 0 }}>{fmt(totalIOwe)}</p>
+            <p style={{ color: "#6b1a1a", fontSize: 10, margin: "2px 0 0" }}>debes tú</p>
+          </div>
+        </div>
+      </div>
 
-      {/* Photo scan */}
-      {BACKEND_URL !== "TU_BACKEND_URL" ? (
-        <ScanZone people={people} setItems={setItems} setLocalName={setLocalName} />
-      ) : (
-        <div style={{ background: "#FBBF2411", border: "1px solid #FBBF2433", borderRadius: 12, padding: "10px 14px", color: "#FBBF24", fontSize: 12 }}>
-          ⚙️ Configura BACKEND_URL en el código para habilitar el escaneo automático
+      {/* Actions */}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={onNew} style={{ flex: 2, background: "linear-gradient(135deg,#7C3AED,#4F46E5)", color: "#fff", border: "none", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>+ División</button>
+        <button onClick={() => onQuick("credit")} style={{ flex: 1, background: "#34D39922", color: "#34D399", border: "1px solid #34D39944", borderRadius: 12, padding: "12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>⚡ Me deben</button>
+        <button onClick={() => onQuick("debt")} style={{ flex: 1, background: "#F8717122", color: "#F87171", border: "1px solid #F8717144", borderRadius: 12, padding: "12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>⚡ Yo debo</button>
+      </div>
+
+      {/* Contacts */}
+      {contacts.length > 0 && (
+        <div>
+          <p style={{ color: "#555", fontSize: 10, fontWeight: 700, margin: "0 0 8px", letterSpacing: 1 }}>CONTACTOS</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {contacts.sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance)).map(c => (
+              <div key={c.id} onClick={() => onContactTap(c)} style={{ display: "flex", alignItems: "center", gap: 10, background: "#1a1730", borderRadius: 12, padding: "11px 14px", border: `0.5px solid ${c.balance > 0 ? "#34D39933" : c.balance < 0 ? "#F8717133" : "#2d2650"}`, cursor: "pointer", opacity: c.balance === 0 ? 0.5 : 1 }}>
+                <Avatar name={c.name} color={c.color} size={36} />
+                <div style={{ flex: 1 }}>
+                  <p style={{ color: c.balance === 0 ? "#666" : "#fff", fontSize: 13, fontWeight: 700, margin: 0 }}>{c.name}</p>
+                  <p style={{ color: "#555", fontSize: 11, margin: "2px 0 0" }}>
+                    {c.balance === 0 ? "todo saldado ✓" : c.balance > 0 ? `${c.pendingCount || 1} cobro${c.pendingCount > 1 ? "s" : ""} pendiente${c.pendingCount > 1 ? "s" : ""}` : "le debes · pendiente"}
+                  </p>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <p style={{ color: c.balance > 0 ? "#34D399" : c.balance < 0 ? "#F87171" : "#555", fontSize: 15, fontWeight: 900, margin: 0 }}>
+                    {c.balance > 0 ? "+" : c.balance < 0 ? "-" : ""}{fmt(c.balance)}
+                  </p>
+                  <p style={{ color: c.balance > 0 ? "#1a6b46" : c.balance < 0 ? "#6b1a1a" : "#444", fontSize: 10, margin: "2px 0 0" }}>
+                    {c.balance > 0 ? "te debe" : c.balance < 0 ? "debes tú" : "saldado"}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
-      {/* Local name */}
-      <input value={localName} onChange={e => setLocalName(e.target.value)} placeholder="Nombre del local..."
-        style={{ background: "rgba(255,255,255,0.06)", border: "1px solid #A78BFA44", borderRadius: 12, padding: "11px 14px", color: "#A78BFA", fontSize: 15, fontWeight: 700, outline: "none" }}
-      />
-
-      {/* Items */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {items.map(item => (
-          <div key={item.id} style={{ display: "flex", gap: 8, alignItems: "center", background: "rgba(255,255,255,0.04)", borderRadius: 14, padding: "10px 12px" }}>
-            <input value={item.name} onChange={e => update(item.id, "name", e.target.value)} placeholder="Ítem"
-              style={{ flex: 1, background: "none", border: "none", color: "#fff", fontSize: 14, outline: "none" }} />
-            <input type="number" value={item.price || ""} onChange={e => update(item.id, "price", Number(e.target.value))} placeholder="$"
-              style={{ width: 84, background: "none", border: "none", color: "#FBBF24", fontSize: 14, fontWeight: 700, textAlign: "right", outline: "none" }} />
-            <button onClick={() => setItems(prev => prev.filter(it => it.id !== item.id))} style={{ background: "none", border: "none", color: "#F87171", cursor: "pointer", fontSize: 16 }}>✕</button>
-          </div>
-        ))}
-      </div>
-      <button onClick={addItem} style={{ background: "none", border: "1px dashed #A78BFA55", borderRadius: 12, padding: "11px", color: "#A78BFA", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>+ Agregar ítem</button>
-
-      {/* Tip selector */}
-      {items.length > 0 && (
-        <Card>
-          <p style={{ color: "#888", fontSize: 12, fontWeight: 700, margin: "0 0 10px", letterSpacing: 1 }}>PROPINA</p>
-          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            {TIP_OPTIONS.map(t => (
-              <button key={t} onClick={() => setTip(t)} style={{
-                flex: 1, padding: "10px 4px", borderRadius: 12, border: "none",
-                background: tip === t ? "linear-gradient(135deg,#7C3AED,#4F46E5)" : "rgba(255,255,255,0.07)",
-                color: tip === t ? "#fff" : "#888", fontWeight: 800, fontSize: 13, cursor: "pointer"
-              }}>{t === 0 ? "Sin propina" : `${t}%`}</button>
-            ))}
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#666", marginBottom: 4 }}>
-            <span>Subtotal</span><span>{fmt(subtotal)}</span>
-          </div>
-          {tip > 0 && (
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#A78BFA", marginBottom: 4 }}>
-              <span>Propina ({tip}%)</span><span>{fmt(tipAmount)}</span>
-            </div>
-          )}
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 18, fontWeight: 900, color: "#fff", marginTop: 8, borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 10 }}>
-            <span>Total</span><span style={{ color: "#FBBF24" }}>{fmt(total)}</span>
-          </div>
-        </Card>
+      {contacts.length === 0 && (
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8, opacity: 0.4 }}>
+          <span style={{ fontSize: 40 }}>💸</span>
+          <p style={{ color: "#555", fontSize: 14, margin: 0 }}>Sin deudas registradas</p>
+        </div>
       )}
-
-      <GradBtn onClick={onNext} disabled={items.length === 0}>Asignar ítems →</GradBtn>
     </div>
   );
 }
 
-// ── SCREEN: Claim Items ───────────────────────────────────────────────────────
-function ClaimScreen({ people, items, setItems, tip, onNext }) {
-  const subtotal = items.reduce((s, it) => s + it.price, 0);
-  const tipAmount = Math.round(subtotal * tip / 100);
+// ── Division Flow ─────────────────────────────────────────────────────────────
+function DivisionFlow({ userName, contacts, cuentas, setCuentas, onDone, onBack }) {
+  const [step, setStep] = useState("people");
+  const [people, setPeople] = useState(() => {
+    const me = { id: uid(), name: userName, color: COLORS[0], isMe: true };
+    return [me];
+  });
+  const [personInput, setPersonInput] = useState("");
+  const [items, setItems] = useState([]);
+  const [showItemForm, setShowItemForm] = useState(false);
+  const [localName, setLocalName] = useState("");
+  const [showPremium, setShowPremium] = useState(false);
+  const [cuentaIdx, setCuentaIdx] = useState(0);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [showAddCuenta, setShowAddCuenta] = useState(false);
+  const [nuevaCuenta, setNuevaCuenta] = useState({ banco: "BancoEstado", tipo: "Cuenta Corriente", numero: "", rut: "", nombre: "" });
+  const personRef = useRef();
 
-  const toggle = (itemId, personId) => {
+  const addPerson = () => {
+    const t = personInput.trim();
+    if (!t || people.find(p => p.name.toLowerCase() === t.toLowerCase())) return;
+    setPeople(prev => [...prev, { id: uid(), name: t, color: COLORS[prev.length % COLORS.length], isMe: false }]);
+    setPersonInput("");
+    personRef.current?.focus();
+  };
+
+  const toggleItemPerson = (itemId, personId) => {
     setItems(prev => prev.map(it => {
       if (it.id !== itemId) return it;
       const has = it.claimedBy.includes(personId);
@@ -343,230 +482,275 @@ function ClaimScreen({ people, items, setItems, tip, onNext }) {
     }));
   };
 
-  const claimAll = (personId) => {
-    setItems(prev => prev.map(it => ({
-      ...it, claimedBy: it.claimedBy.includes(personId) ? it.claimedBy : [...it.claimedBy, personId]
-    })));
+  const addItem = (item) => {
+    const me = people.find(p => p.isMe);
+    setItems(prev => [...prev, { ...item, claimedBy: me ? [me.id] : [] }]);
+    setShowItemForm(false);
   };
-
-  const getPersonTotal = (personId) => {
-    const share = items.reduce((s, it) => {
-      if (!it.claimedBy.includes(personId)) return s;
-      return s + it.price / it.claimedBy.length;
-    }, 0);
-    const tipShare = subtotal > 0 ? (share / subtotal) * tipAmount : 0;
-    return Math.round(share + tipShare);
-  };
-
-  const unclaimed = items.filter(it => it.claimedBy.length === 0);
-
-  return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: 24, gap: 16, overflowY: "auto" }}>
-      <div>
-        <p style={{ color: "#A78BFA", fontSize: 12, fontWeight: 700, margin: 0, letterSpacing: 1 }}>PASO 3 DE 3</p>
-        <h2 style={{ margin: "4px 0 0", fontSize: 28, fontWeight: 900, letterSpacing: -1 }}>¿Quién pidió qué?</h2>
-        <p style={{ color: "#666", margin: "4px 0 0", fontSize: 14 }}>Toca tu nombre en cada ítem</p>
-      </div>
-
-      {unclaimed.length > 0 && (
-        <div style={{ background: "#FBBF2411", border: "1px solid #FBBF2444", borderRadius: 12, padding: "10px 14px", color: "#FBBF24", fontSize: 13, fontWeight: 600 }}>
-          ⚠ {unclaimed.length} ítem{unclaimed.length > 1 ? "s" : ""} sin asignar
-        </div>
-      )}
-
-      {/* Items */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {items.map(item => (
-          <Card key={item.id} style={{ padding: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-              <span style={{ fontWeight: 700, fontSize: 15 }}>{item.name || "Sin nombre"}</span>
-              <span style={{ color: "#FBBF24", fontWeight: 800, fontSize: 15 }}>{fmt(item.price)}</span>
-            </div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {people.map(p => {
-                const active = item.claimedBy.includes(p.id);
-                return (
-                  <button key={p.id} onClick={() => toggle(item.id, p.id)} style={{
-                    background: active ? `${p.color}25` : "rgba(255,255,255,0.05)",
-                    border: `1.5px solid ${active ? p.color : "rgba(255,255,255,0.1)"}`,
-                    borderRadius: 99, padding: "5px 12px", color: active ? p.color : "#666",
-                    fontSize: 13, fontWeight: 700, cursor: "pointer"
-                  }}>{p.name.split(" ")[0]}</button>
-                );
-              })}
-            </div>
-            {item.claimedBy.length > 1 && (
-              <p style={{ color: "#666", fontSize: 11, margin: "8px 0 0" }}>
-                {fmt(Math.round(item.price / item.claimedBy.length))} c/u
-              </p>
-            )}
-          </Card>
-        ))}
-      </div>
-
-      {/* Per person preview */}
-      <Card>
-        <p style={{ color: "#888", fontSize: 12, fontWeight: 700, margin: "0 0 12px", letterSpacing: 1 }}>RESUMEN PRELIMINAR</p>
-        {people.map(p => (
-          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-            <Avatar name={p.name} color={p.color} size={32} />
-            <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>{p.name}</span>
-            <span style={{ fontWeight: 800, color: p.color, fontSize: 15 }}>{fmt(getPersonTotal(p.id))}</span>
-          </div>
-        ))}
-      </Card>
-
-      <GradBtn onClick={onNext} disabled={unclaimed.length > 0}>
-        {unclaimed.length > 0 ? `Faltan ${unclaimed.length} ítem${unclaimed.length > 1 ? "s" : ""}` : "Ver resumen final →"}
-      </GradBtn>
-    </div>
-  );
-}
-
-// ── SCREEN: Summary ───────────────────────────────────────────────────────────
-function SummaryScreen({ people, items, localName, tip, onReset }) {
-  const [payerIdx, setPayerIdx] = useState(0);
-  const [payerAccount, setPayerAccount] = useState("");
-
-  const subtotal = items.reduce((s, it) => s + it.price, 0);
-  const tipAmount = Math.round(subtotal * tip / 100);
 
   const getOwes = (personId) => {
-    const share = items.reduce((s, it) => {
+    return items.reduce((s, it) => {
       if (!it.claimedBy.includes(personId)) return s;
-      return s + it.price / it.claimedBy.length;
+      return s + it.total / it.claimedBy.length;
     }, 0);
-    const tipShare = subtotal > 0 ? (share / subtotal) * tipAmount : 0;
-    return Math.round(share + tipShare);
   };
 
-  const balances = people.map(p => ({ ...p, owes: getOwes(p.id) }));
-  const total = subtotal + tipAmount;
-  const payer = people[payerIdx];
+  const cuenta = cuentas[cuentaIdx];
 
-  const waLink = (person, amount) => {
-    const acc = payerAccount.trim();
-    const msg = `Hola ${person.name}! 🧾 Me debes ${fmt(amount)} de ${localName || "la cuenta"}.\nTransfiere a ${payer?.name}${acc ? `\nCuenta: ${acc}` : ""}\n\nDetalle:\n${items.filter(it => it.claimedBy.includes(person.id)).map(it => `• ${it.name}: ${fmt(Math.round(it.price / it.claimedBy.length))}`).join("\n")}${tip > 0 ? `\n• Propina (${tip}%): ${fmt(Math.round(getOwes(person.id) - getOwes(person.id) / (1 + tip/100)))}` : ""}`;
-    return `https://wa.me/?text=${encodeURIComponent(msg)}`;
+  const guardarCuenta = () => {
+    if (!nuevaCuenta.numero || !nuevaCuenta.rut || !nuevaCuenta.nombre) return;
+    const updated = [...cuentas, nuevaCuenta];
+    setCuentas(updated); save("splitcl_cuentas", updated);
+    setCuentaIdx(updated.length - 1); setShowAddCuenta(false);
   };
 
-  return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: 24, gap: 16, overflowY: "auto" }}>
-      {/* Header card */}
-      <Card style={{ background: "linear-gradient(135deg, #4C1D95, #312e81)", border: "none", textAlign: "center" }}>
-        <p style={{ color: "#C4B5FD", fontSize: 12, fontWeight: 700, margin: "0 0 4px", letterSpacing: 1 }}>
-          {localName || "RESTAURANTE"} · ✅ DIVIDIDO
-        </p>
-        <p style={{ fontSize: 42, fontWeight: 900, margin: "8px 0", color: "#fff", letterSpacing: -2 }}>{fmt(total)}</p>
-        <p style={{ color: "#7C6FCD", fontSize: 13, margin: 0 }}>
-          Subtotal {fmt(subtotal)}{tip > 0 ? ` + propina ${fmt(tipAmount)}` : ""}
-        </p>
-      </Card>
+  const waLink = (person) => {
+    const owes = Math.round(getOwes(person.id));
+    const detail = items.filter(it => it.claimedBy.includes(person.id))
+      .map(it => `• ${it.name}${it.tip > 0 ? ` (+${it.tip}% prop.)` : ""}: ${fmt(Math.round(it.total / it.claimedBy.length))}`).join("\n");
+    const cuentaTxt = cuenta ? `\n\nTransfiere a:\n${cuenta.banco} · ${cuenta.tipo}\nN°: ${cuenta.numero}\nRUT: ${cuenta.rut}` : "";
+    const me = people.find(p => p.isMe);
+    return `https://wa.me/?text=${encodeURIComponent(`Hola ${person.name}! Me debes ${fmt(owes)} de ${localName || "la cuenta"} 🧾\n${detail}${cuentaTxt}`)}`;
+  };
 
-      {/* Per person */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {balances.map(b => (
-          <Card key={b.id} style={{ padding: "12px 16px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <Avatar name={b.name} color={b.color} size={40} />
-              <div style={{ flex: 1 }}>
-                <p style={{ margin: 0, fontWeight: 800, fontSize: 15 }}>{b.name}</p>
-                <p style={{ margin: 0, color: "#555", fontSize: 12 }}>
-                  {items.filter(it => it.claimedBy.includes(b.id)).length} ítem{items.filter(it => it.claimedBy.includes(b.id)).length !== 1 ? "s" : ""}
-                  {tip > 0 ? ` + propina` : ""}
-                </p>
-              </div>
-              <span style={{ fontSize: 22, fontWeight: 900, color: b.color }}>{fmt(b.owes)}</span>
-            </div>
-          </Card>
+  const totalItems = items.reduce((s, it) => s + it.total, 0);
+
+  if (step === "people") return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: 24, gap: 16 }}>
+      <div>
+        <p style={{ color: "#A78BFA", fontSize: 11, fontWeight: 700, margin: "0 0 2px", letterSpacing: 1 }}>PASO 1 DE 2</p>
+        <h2 style={{ color: "#fff", fontSize: 24, fontWeight: 900, margin: 0 }}>¿Quiénes van?</h2>
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <input ref={personRef} value={personInput} onChange={e => setPersonInput(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && addPerson()} placeholder="Agregar persona..."
+          style={{ flex: 1, background: "#1a1730", border: "0.5px solid #3d3570", borderRadius: 12, padding: "12px 14px", color: "#fff", fontSize: 14, outline: "none" }} />
+        <button onClick={addPerson} style={{ background: "linear-gradient(135deg,#7C3AED,#4F46E5)", color: "#fff", border: "none", borderRadius: 12, padding: "12px 18px", fontWeight: 900, fontSize: 18, cursor: "pointer" }}>+</button>
+      </div>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8, overflowY: "auto" }}>
+        {people.map(p => (
+          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, background: `${p.color}11`, borderRadius: 12, padding: "10px 14px", border: `0.5px solid ${p.color}33` }}>
+            <Avatar name={p.name} color={p.color} size={34} />
+            <span style={{ flex: 1, color: "#fff", fontSize: 14, fontWeight: 600 }}>{p.name}{p.isMe ? <span style={{ color: p.color, fontSize: 11, marginLeft: 6 }}>· tú</span> : ""}</span>
+            {!p.isMe ? <button onClick={() => setPeople(prev => prev.filter(x => x.id !== p.id))} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: 16 }}>✕</button>
+              : <button onClick={() => setPeople(prev => prev.filter(x => x.id !== p.id))} style={{ background: "none", border: "none", color: "#3d3570", cursor: "pointer", fontSize: 11 }}>quitar</button>}
+          </div>
         ))}
       </div>
+      <GradBtn onClick={() => setStep("items")} disabled={people.length < 2}>Continuar →</GradBtn>
+    </div>
+  );
 
-      {/* Who paid + account */}
-      <Card>
-        <p style={{ color: "#888", fontSize: 12, fontWeight: 700, margin: "0 0 10px", letterSpacing: 1 }}>¿QUIÉN PAGÓ?</p>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-          {people.map((p, i) => (
-            <button key={p.id} onClick={() => setPayerIdx(i)} style={{
-              background: payerIdx === i ? `${p.color}22` : "rgba(255,255,255,0.05)",
-              border: `1.5px solid ${payerIdx === i ? p.color : "rgba(255,255,255,0.1)"}`,
-              borderRadius: 99, padding: "6px 14px",
-              color: payerIdx === i ? p.color : "#666", fontSize: 13, fontWeight: 700, cursor: "pointer"
-            }}>{p.name.split(" ")[0]}</button>
-          ))}
+  if (step === "items") return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: 24, gap: 14, overflowY: "auto" }}>
+      {showPremium && <PremiumModal onClose={() => setShowPremium(false)} />}
+      <div>
+        <p style={{ color: "#A78BFA", fontSize: 11, fontWeight: 700, margin: "0 0 2px", letterSpacing: 1 }}>PASO 2 DE 2</p>
+        <h2 style={{ color: "#fff", fontSize: 24, fontWeight: 900, margin: 0 }}>La boleta</h2>
+      </div>
+
+      {/* Premium scan button */}
+      <button onClick={() => setShowPremium(true)} style={{ display: "flex", alignItems: "center", gap: 10, background: "linear-gradient(135deg,#1c1040,#2d1b69)", border: "1px solid #7C3AED55", borderRadius: 14, padding: "13px 16px", cursor: "pointer", width: "100%", textAlign: "left" }}>
+        <span style={{ fontSize: 22 }}>📸</span>
+        <div style={{ flex: 1 }}>
+          <p style={{ color: "#A78BFA", fontSize: 13, fontWeight: 700, margin: 0 }}>Escanear boleta</p>
+          <p style={{ color: "#7C3AED", fontSize: 11, margin: 0 }}>Extrae ítems automáticamente</p>
         </div>
-        <input placeholder="N° cuenta bancaria (opcional)" value={payerAccount} onChange={e => setPayerAccount(e.target.value)}
-          style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "11px 14px", color: "#fff", fontSize: 14, outline: "none", boxSizing: "border-box" }}
-        />
-      </Card>
+        <span style={{ background: "#7C3AED22", color: "#A78BFA", fontSize: 10, borderRadius: 99, padding: "3px 10px", border: "0.5px solid #7C3AED44", fontWeight: 700 }}>Premium · $2.990</span>
+      </button>
 
-      {/* WhatsApp links */}
+      {/* Local name */}
+      <input value={localName} onChange={e => setLocalName(e.target.value)} placeholder="Nombre del local..."
+        style={{ background: "#1a1730", border: "0.5px solid #7C3AED44", borderRadius: 10, padding: "10px 14px", color: "#A78BFA", fontSize: 14, fontWeight: 700, outline: "none" }} />
+
+      {/* Items */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <p style={{ color: "#888", fontSize: 12, fontWeight: 700, margin: 0, letterSpacing: 1 }}>COBRAR POR WHATSAPP</p>
-        {balances.filter(b => b.id !== payer?.id).map(b => (
-          <a key={b.id} href={waLink(b, b.owes)} target="_blank" rel="noreferrer"
-            style={{ display: "flex", alignItems: "center", gap: 12, background: `${b.color}0d`, borderRadius: 16, padding: "14px 16px", border: `1.5px solid ${b.color}33`, textDecoration: "none" }}>
-            <Avatar name={b.name} color={b.color} size={38} />
-            <div style={{ flex: 1 }}>
-              <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: "#fff" }}>{b.name}</p>
-              <p style={{ margin: 0, fontSize: 12, color: "#666" }}>debe {fmt(b.owes)} · con desglose</p>
+        {items.map(it => (
+          <div key={it.id} style={{ background: it.tip > 0 ? "#F59E0B11" : "#1a1730", borderRadius: 12, border: `0.5px solid ${it.tip > 0 ? "#F59E0B44" : "#2d2650"}`, overflow: "hidden" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "0.5px solid #1f1c35" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: it.tip > 0 ? "#F59E0B" : "#A78BFA", flexShrink: 0 }} />
+                <span style={{ color: it.tip > 0 ? "#F59E0B" : "#fff", fontSize: 13, fontWeight: 600 }}>{it.name}</span>
+                {it.tip > 0 && <span style={{ background: "#F59E0B22", color: "#F59E0B", fontSize: 9, borderRadius: 99, padding: "1px 6px", border: "0.5px solid #F59E0B44" }}>+{it.tip}%</span>}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ color: it.tip > 0 ? "#F59E0B" : "#FBBF24", fontSize: 13, fontWeight: 700 }}>{fmt(it.total)}</span>
+                <button onClick={() => setItems(prev => prev.filter(x => x.id !== it.id))} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: 14 }}>✕</button>
+              </div>
             </div>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 22 }}>💬</div>
-              <div style={{ fontSize: 10, color: "#25D366", fontWeight: 700 }}>Cobrar</div>
+            <div style={{ display: "flex", gap: 5, padding: "8px 12px", flexWrap: "wrap", alignItems: "center" }}>
+              {people.map(p => {
+                const active = it.claimedBy.includes(p.id);
+                return <button key={p.id} onClick={() => toggleItemPerson(it.id, p.id)} style={{ background: active ? `${p.color}22` : "none", border: `${active ? 1.5 : 0.5}px solid ${active ? p.color : "#333"}`, borderRadius: 99, padding: "3px 10px", color: active ? p.color : "#555", fontSize: 11, fontWeight: active ? 700 : 400, cursor: "pointer" }}>{p.name.split(" ")[0]}</button>;
+              })}
+              {it.claimedBy.length > 1 && <span style={{ color: "#555", fontSize: 10, marginLeft: "auto" }}>{fmt(Math.round(it.total / it.claimedBy.length))} c/u</span>}
             </div>
-          </a>
+          </div>
         ))}
+        {showItemForm ? <ItemForm onAdd={addItem} onCancel={() => setShowItemForm(false)} /> : (
+          <button onClick={() => setShowItemForm(true)} style={{ background: "none", border: "1px dashed #3d3570", borderRadius: 12, padding: "12px", color: "#7C6FCD", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>+ Agregar ítem</button>
+        )}
       </div>
 
-      <button onClick={onReset} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14, padding: "14px", color: "#888", fontSize: 15, fontWeight: 700, cursor: "pointer", marginTop: 4 }}>
-        Nueva división
-      </button>
+      {/* Total */}
+      {items.length > 0 && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 4px", borderTop: "0.5px solid #2d2650" }}>
+          <span style={{ color: "#666", fontSize: 13 }}>Total</span>
+          <span style={{ color: "#FBBF24", fontSize: 20, fontWeight: 900 }}>{fmt(totalItems)}</span>
+        </div>
+      )}
+
+      {/* Cuenta */}
+      {items.length > 0 && localName.trim() && (
+        <div>
+          <Label>Cobrar con</Label>
+          {cuentas.length === 0 ? (
+            <button onClick={() => setShowAddCuenta(true)} style={{ width: "100%", background: "#1a1730", border: "1px dashed #3d3570", borderRadius: 12, padding: "11px", color: "#7C6FCD", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>+ Agregar cuenta bancaria</button>
+          ) : (
+            <div>
+              <div style={{ background: "#1a1730", borderRadius: 12, padding: "11px 14px", border: "1.5px solid #7C3AED", marginBottom: 6 }}>
+                <p style={{ color: "#fff", fontSize: 13, fontWeight: 700, margin: "0 0 2px" }}>{cuenta?.banco} · {cuenta?.tipo}</p>
+                <p style={{ color: "#666", fontSize: 11, margin: 0 }}>N°: {cuenta?.numero} · RUT: {cuenta?.rut}</p>
+              </div>
+              <div style={{ background: "#1a1730", borderRadius: 12, border: "0.5px solid #2d2650", overflow: "hidden" }}>
+                <div onClick={() => setShowDropdown(!showDropdown)} style={{ display: "flex", justifyContent: "space-between", padding: "9px 14px", cursor: "pointer" }}>
+                  <span style={{ color: "#7C6FCD", fontSize: 12 }}>Usar otra cuenta</span>
+                  <span style={{ color: "#555" }}>{showDropdown ? "▴" : "▾"}</span>
+                </div>
+                {showDropdown && (
+                  <div style={{ borderTop: "0.5px solid #2d2650" }}>
+                    {cuentas.map((c, i) => i !== cuentaIdx && (
+                      <div key={i} onClick={() => { setCuentaIdx(i); setShowDropdown(false); }} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", cursor: "pointer", borderBottom: "0.5px solid #2d2650" }}>
+                        <div style={{ width: 22, height: 22, borderRadius: 6, background: "#A78BFA22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#A78BFA", fontWeight: 700 }}>{c.banco.charAt(0)}</div>
+                        <div><p style={{ color: "#fff", fontSize: 12, fontWeight: 600, margin: 0 }}>{c.banco} · {c.tipo}</p><p style={{ color: "#555", fontSize: 11, margin: 0 }}>N°: {c.numero}</p></div>
+                      </div>
+                    ))}
+                    <div onClick={() => { setShowAddCuenta(true); setShowDropdown(false); }} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", cursor: "pointer" }}>
+                      <div style={{ width: 22, height: 22, borderRadius: 6, background: "#7C3AED22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "#A78BFA" }}>+</div>
+                      <span style={{ color: "#7C6FCD", fontSize: 12 }}>Agregar nueva cuenta</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {showAddCuenta && (
+            <Card style={{ marginTop: 10 }}>
+              <Label>Nueva cuenta</Label>
+              {[{ label: "Banco", key: "banco", type: "select", options: BANCOS }, { label: "Tipo", key: "tipo", type: "select", options: TIPOS }, { label: "N° cuenta", key: "numero", placeholder: "00-000-00000-00" }, { label: "RUT", key: "rut", placeholder: "12.345.678-9" }, { label: "Nombre", key: "nombre", placeholder: "Como aparece en el banco" }].map(f => (
+                <div key={f.key} style={{ marginBottom: 8 }}>
+                  <p style={{ color: "#666", fontSize: 11, margin: "0 0 4px" }}>{f.label}</p>
+                  {f.type === "select" ? (
+                    <select value={nuevaCuenta[f.key]} onChange={e => setNuevaCuenta(n => ({ ...n, [f.key]: e.target.value }))} style={{ width: "100%", background: "#0d0b1a", border: "0.5px solid #3d3570", borderRadius: 8, padding: "8px 10px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }}>
+                      {f.options.map(o => <option key={o}>{o}</option>)}
+                    </select>
+                  ) : (
+                    <input value={nuevaCuenta[f.key]} onChange={e => setNuevaCuenta(n => ({ ...n, [f.key]: e.target.value }))} placeholder={f.placeholder} style={{ width: "100%", background: "#0d0b1a", border: "0.5px solid #3d3570", borderRadius: 8, padding: "8px 10px", color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+                  )}
+                </div>
+              ))}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => setShowAddCuenta(false)} style={{ flex: 1, background: "#1a1730", border: "0.5px solid #3d3570", borderRadius: 10, padding: "9px", color: "#666", fontSize: 13, cursor: "pointer" }}>Cancelar</button>
+                <button onClick={guardarCuenta} style={{ flex: 2, background: "linear-gradient(135deg,#7C3AED,#4F46E5)", border: "none", borderRadius: 10, padding: "9px", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Guardar →</button>
+              </div>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* WhatsApp cobrar + guardar */}
+      {items.length > 0 && localName.trim() && !showItemForm && (
+        <div style={{ position: "sticky", bottom: 0, paddingTop: 8, paddingBottom: 8, background: "linear-gradient(to top,#080810 70%,transparent)", display: "flex", flexDirection: "column", gap: 8 }}>
+          {cuenta && people.filter(p => !p.isMe).map(p => (
+            <a key={p.id} href={waLink(p)} target="_blank" rel="noreferrer"
+              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#25D36622", border: "0.5px solid #25D36644", borderRadius: 12, padding: "11px 16px", textDecoration: "none" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 16 }}>💬</span>
+                <span style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>Cobrar a {p.name}</span>
+              </div>
+              <span style={{ color: "#34D399", fontSize: 13, fontWeight: 700 }}>{fmt(Math.round(getOwes(p.id)))}</span>
+            </a>
+          ))}
+          <GradBtn onClick={() => onDone({ people, items, localName, total: totalItems })}>✓ Guardar división</GradBtn>
+        </div>
+      )}
     </div>
   );
 }
 
-// ── App Shell ─────────────────────────────────────────────────────────────────
-const SCREENS = ["home", "people", "items", "claim", "summary"];
-
+// ── App ───────────────────────────────────────────────────────────────────────
 export default function SplitCL() {
-  const [screen, setScreen] = useState("home");
-  const [people, setPeople] = useState([]);
-  const [items, setItems] = useState([]);
-  const [localName, setLocalName] = useState("");
-  const [tip, setTip] = useState(10);
+  const [userName, setUserName] = useState(() => load("splitcl_name", ""));
+  const [contacts, setContacts] = useState(() => purgeContacts(load("splitcl_contacts", [])));
+  const [cuentas, setCuentas] = useState(() => load("splitcl_cuentas", []));
+  const [screen, setScreen] = useState("home"); // home | division | quick | contact
+  const [quickType, setQuickType] = useState("credit");
+  const [activeContact, setActiveContact] = useState(null);
 
-  const reset = () => { setPeople([]); setItems([]); setLocalName(""); setTip(10); setScreen("home"); };
-  const idx = SCREENS.indexOf(screen);
-  const go = (s) => setScreen(s);
+  const saveContacts = (c) => { setContacts(c); save("splitcl_contacts", c); };
+
+  const upsertContact = (name, colorFallback, balanceDelta) => {
+    setContacts(prev => {
+      const existing = prev.find(c => c.name.toLowerCase() === name.toLowerCase());
+      let updated;
+      if (existing) {
+        updated = prev.map(c => {
+          if (c.name.toLowerCase() !== name.toLowerCase()) return c;
+          const newBalance = c.balance + balanceDelta;
+          return { ...c, balance: newBalance, settledAt: newBalance === 0 ? Date.now() : null, pendingCount: (c.pendingCount || 0) + 1 };
+        });
+      } else {
+        updated = [...prev, { id: uid(), name, color: colorFallback || COLORS[contacts.length % COLORS.length], balance: balanceDelta, settledAt: balanceDelta === 0 ? Date.now() : null, pendingCount: 1 }];
+      }
+      save("splitcl_contacts", updated);
+      return updated;
+    });
+  };
+
+  const handleDivisionDone = ({ people, items, localName, total }) => {
+    people.filter(p => !p.isMe).forEach(p => {
+      const owes = Math.round(items.reduce((s, it) => {
+        if (!it.claimedBy.includes(p.id)) return s;
+        return s + it.total / it.claimedBy.length;
+      }, 0));
+      if (owes > 0) upsertContact(p.name, p.color, owes);
+    });
+    setScreen("home");
+  };
+
+  const handleQuickSave = ({ type, personName, selectedContact, items, total }) => {
+    const delta = type === "debt" ? -total : total;
+    upsertContact(personName, selectedContact?.color || null, delta);
+    setScreen("home");
+  };
+
+  const handleOnboarding = (name) => { setUserName(name); save("splitcl_name", name); };
+
+  if (!userName) return (
+    <Wrapper><OnboardingScreen onDone={handleOnboarding} /></Wrapper>
+  );
 
   return (
-    <div style={{
-      minHeight: "100vh", background: "#080810",
-      color: "#fff", fontFamily: "'DM Sans', 'Outfit', system-ui, sans-serif",
-      display: "flex", flexDirection: "column", maxWidth: 430, margin: "0 auto",
-      backgroundImage: "radial-gradient(ellipse at 20% 0%, #2e1065 0%, transparent 50%), radial-gradient(ellipse at 80% 100%, #1e1b4b 0%, transparent 50%)"
-    }}>
-      {/* Top nav */}
+    <Wrapper>
       {screen !== "home" && (
-        <div style={{ display: "flex", alignItems: "center", padding: "16px 20px", gap: 12, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-          <button onClick={() => go(SCREENS[idx - 1] || "home")} style={{ background: "rgba(255,255,255,0.08)", border: "none", color: "#fff", borderRadius: 12, width: 36, height: 36, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>←</button>
-          <span style={{ fontWeight: 900, fontSize: 17, letterSpacing: -0.5 }}>Split<span style={{ color: "#A78BFA" }}>CL</span></span>
-          <div style={{ display: "flex", gap: 5, marginLeft: "auto" }}>
-            {["people","items","claim","summary"].map((s, i) => (
-              <div key={s} style={{ width: i <= idx - 1 ? 20 : 8, height: 8, borderRadius: 99, background: i <= idx - 1 ? "linear-gradient(90deg,#7C3AED,#4F46E5)" : "rgba(255,255,255,0.15)", transition: "all 0.3s" }} />
-            ))}
-          </div>
+        <div style={{ display: "flex", alignItems: "center", padding: "14px 20px", gap: 12, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+          <button onClick={() => setScreen("home")} style={{ background: "rgba(255,255,255,0.07)", border: "none", color: "#fff", borderRadius: 10, width: 34, height: 34, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>←</button>
+          <span style={{ fontWeight: 900, fontSize: 16 }}>Split<span style={{ color: "#A78BFA" }}>CL</span></span>
         </div>
       )}
-
-      <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-        {screen === "home"    && <HomeScreen onNew={() => go("people")} />}
-        {screen === "people"  && <PeopleScreen people={people} setPeople={setPeople} onNext={() => go("items")} />}
-        {screen === "items"   && <ItemsScreen people={people} items={items} setItems={setItems} localName={localName} setLocalName={setLocalName} tip={tip} setTip={setTip} onNext={() => go("claim")} />}
-        {screen === "claim"   && <ClaimScreen people={people} items={items} setItems={setItems} tip={tip} onNext={() => go("summary")} />}
-        {screen === "summary" && <SummaryScreen people={people} items={items} localName={localName} tip={tip} onReset={reset} />}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {screen === "home" && <HomeScreen userName={userName} contacts={contacts} onNew={() => setScreen("division")} onQuick={(t) => { setQuickType(t); setScreen("quick"); }} onContactTap={(c) => { setActiveContact(c); }} />}
+        {screen === "division" && <DivisionFlow userName={userName} contacts={contacts} cuentas={cuentas} setCuentas={setCuentas} onDone={handleDivisionDone} onBack={() => setScreen("home")} />}
+        {screen === "quick" && <QuickScreen type={quickType} contacts={contacts} cuentas={cuentas} setCuentas={setCuentas} onSave={handleQuickSave} onBack={() => setScreen("home")} />}
       </div>
+    </Wrapper>
+  );
+}
+
+function Wrapper({ children }) {
+  return (
+    <div style={{ minHeight: "100vh", background: "#080810", color: "#fff", fontFamily: "'DM Sans',system-ui,sans-serif", display: "flex", flexDirection: "column", maxWidth: 430, margin: "0 auto", backgroundImage: "radial-gradient(ellipse at 20% 0%,#2e1065 0%,transparent 50%),radial-gradient(ellipse at 80% 100%,#1e1b4b 0%,transparent 50%)" }}>
+      {children}
     </div>
   );
 }
