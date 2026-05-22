@@ -147,8 +147,7 @@ function ItemForm({ onAdd, onCancel, accentColor = "#A78BFA" }) {
   const confirmPrice = () => {
     const p = parseInt(String(price).replace(/\./g, "")) || 0;
     if (!p) return;
-    const tipAmt = Math.round(p * tip / 100);
-    onAdd({ id: uid(), name: name.trim(), price: p, tip, total: p + tipAmt });
+    onAdd({ id: uid(), name: name.trim(), price: p, tip: 0, total: p });
   };
 
   if (step === "name") return (
@@ -178,19 +177,7 @@ function ItemForm({ onAdd, onCancel, accentColor = "#A78BFA" }) {
             placeholder="0" type="number"
             style={{ flex: 1, background: "none", border: "none", color: "#FBBF24", fontSize: 26, fontWeight: 900, outline: "none", padding: 0 }} />
         </div>
-        <p style={{ color: "#555", fontSize: 12, margin: "4px 0 8px" }}>{name}</p>
-        <div style={{ display: "flex", gap: 6 }}>
-          {[0,10,15,20].map(t => (
-            <button key={t} onClick={() => setTip(t)} style={{ flex: 1, padding: "6px 4px", borderRadius: 8, border: "none", background: tip === t ? "#F59E0B" : "#0d0b1a", color: tip === t ? "#0d0b1a" : "#666", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>
-              {t === 0 ? "Sin" : `+${t}%`}
-            </button>
-          ))}
-        </div>
-        {tip > 0 && price && (
-          <p style={{ color: "#F59E0B", fontSize: 11, margin: "6px 0 0" }}>
-            Total con propina: {fmt(Math.round((parseInt(String(price).replace(/\./g,""))||0) * (1 + tip/100)))}
-          </p>
-        )}
+        <p style={{ color: "#555", fontSize: 12, margin: "4px 0 0" }}>{name}</p>
       </div>
       <div style={{ background: "#191500", padding: "8px 14px", display: "flex", justifyContent: "space-between" }}>
         <button onClick={() => setStep("name")} style={{ background: "#ffffff11", border: "1px solid #ffffff22", borderRadius: 8, padding: "5px 14px", color: "#aaa", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>← Nombre</button>
@@ -565,32 +552,82 @@ function DivisionFlow({ userName, contacts, cuentas, setCuentas, onDone, onBack 
 
       {/* Items */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {items.map(it => (
-          <div key={it.id} style={{ background: it.tip > 0 ? "#F59E0B11" : "#1a1730", borderRadius: 12, border: `0.5px solid ${it.tip > 0 ? "#F59E0B44" : "#2d2650"}`, overflow: "hidden" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "0.5px solid #1f1c35" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ width: 6, height: 6, borderRadius: "50%", background: it.tip > 0 ? "#F59E0B" : "#A78BFA", flexShrink: 0 }} />
-                <span style={{ color: it.tip > 0 ? "#F59E0B" : "#fff", fontSize: 13, fontWeight: 600 }}>{it.name}</span>
-                {it.tip > 0 && <span style={{ background: "#F59E0B22", color: "#F59E0B", fontSize: 9, borderRadius: 99, padding: "1px 6px", border: "0.5px solid #F59E0B44" }}>+{it.tip}%</span>}
+        {items.map(it => {
+          const hasTip = it.tip > 0;
+          const tipAmt = Math.round(it.price * it.tip / 100);
+          const perPerson = it.claimedBy.length > 1 ? Math.round(it.total / it.claimedBy.length) : 0;
+          return (
+            <div key={it.id} style={{ background: hasTip ? "#F59E0B11" : "#1a1730", borderRadius: 12, border: `0.5px solid ${hasTip ? "#F59E0B55" : "#2d2650"}`, overflow: "hidden" }}>
+              <div style={{ display: "flex", alignItems: "center", borderBottom: "0.5px solid #1f1c35" }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: hasTip ? "#F59E0B" : "#A78BFA", flexShrink: 0, marginLeft: 12 }} />
+                <input
+                  value={it.name}
+                  onChange={e => setItems(prev => prev.map(x => x.id === it.id ? { ...x, name: e.target.value } : x))}
+                  style={{ flex: 1, background: "none", border: "none", color: hasTip ? "#F59E0B" : "#fff", fontSize: 13, fontWeight: 600, padding: "10px 8px", outline: "none" }}
+                />
+                {hasTip && <span style={{ background: "#F59E0B22", color: "#F59E0B", fontSize: 9, borderRadius: 99, padding: "1px 6px", border: "0.5px solid #F59E0B44", marginRight: 6, whiteSpace: "nowrap" }}>+{it.tip}%</span>}
+                <input
+                  type="number"
+                  value={it.price}
+                  onChange={e => {
+                    const p = parseInt(e.target.value) || 0;
+                    const t = Math.round(p * it.tip / 100);
+                    setItems(prev => prev.map(x => x.id === it.id ? { ...x, price: p, total: p + t } : x));
+                  }}
+                  style={{ width: 76, background: "none", border: "none", color: hasTip ? "#F59E0B" : "#FBBF24", fontSize: 13, fontWeight: 700, padding: "10px 8px", outline: "none", textAlign: "right" }}
+                />
+                <button onClick={() => setItems(prev => prev.filter(x => x.id !== it.id))} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: 14, padding: "0 12px 0 4px" }}>✕</button>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ color: it.tip > 0 ? "#F59E0B" : "#FBBF24", fontSize: 13, fontWeight: 700 }}>{fmt(it.total)}</span>
-                <button onClick={() => setItems(prev => prev.filter(x => x.id !== it.id))} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: 14 }}>✕</button>
+              <div style={{ display: "flex", gap: 5, padding: "7px 10px", flexWrap: "wrap", alignItems: "center" }}>
+                {people.map(p => {
+                  const active = it.claimedBy.includes(p.id);
+                  return <button key={p.id} onClick={() => toggleItemPerson(it.id, p.id)} style={{ background: active ? p.color + "22" : "none", border: (active ? 1.5 : 0.5) + "px solid " + (active ? p.color : "#333"), borderRadius: 99, padding: "3px 10px", color: active ? p.color : "#555", fontSize: 11, fontWeight: active ? 700 : 400, cursor: "pointer" }}>{p.name.split(" ")[0]}</button>;
+                })}
+                {perPerson > 0 && <span style={{ color: "#555", fontSize: 10, marginLeft: "auto" }}>{fmt(perPerson)} c/u</span>}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 5, padding: "8px 12px", flexWrap: "wrap", alignItems: "center" }}>
-              {people.map(p => {
-                const active = it.claimedBy.includes(p.id);
-                return <button key={p.id} onClick={() => toggleItemPerson(it.id, p.id)} style={{ background: active ? `${p.color}22` : "none", border: `${active ? 1.5 : 0.5}px solid ${active ? p.color : "#333"}`, borderRadius: 99, padding: "3px 10px", color: active ? p.color : "#555", fontSize: 11, fontWeight: active ? 700 : 400, cursor: "pointer" }}>{p.name.split(" ")[0]}</button>;
-              })}
-              {it.claimedBy.length > 1 && <span style={{ color: "#555", fontSize: 10, marginLeft: "auto" }}>{fmt(Math.round(it.total / it.claimedBy.length))} c/u</span>}
-            </div>
-          </div>
-        ))}
+          );
+        })}
         {showItemForm ? <ItemForm onAdd={addItem} onCancel={() => setShowItemForm(false)} /> : (
           <button onClick={() => setShowItemForm(true)} style={{ background: "none", border: "1px dashed #3d3570", borderRadius: 12, padding: "12px", color: "#7C6FCD", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>+ Agregar ítem</button>
         )}
       </div>
+
+      {/* Tip selector at bottom */}
+      {items.length > 0 && !showItemForm && (
+        <div style={{ background: "#1a1730", borderRadius: 14, padding: 14, border: "0.5px solid #2d2650" }}>
+          <p style={{ color: "#555", fontSize: 10, fontWeight: 700, margin: "0 0 8px", letterSpacing: 1 }}>PROPINA — selecciona % y marca los ítems que la llevan</p>
+          <div style={{ display: "flex", gap: 6, marginBottom: items.some(it => it.tip > 0) ? 10 : 0 }}>
+            {[0, 10, 15, 20].map(t => (
+              <button key={t} onClick={() => {
+                setItems(prev => prev.map(it => {
+                  if (it.tip === t) return it;
+                  const tipAmt = Math.round(it.price * t / 100);
+                  return { ...it, tip: t, total: it.price + tipAmt };
+                }));
+              }} style={{ flex: 1, padding: "8px 4px", borderRadius: 10, border: "none", background: items.every(it => it.tip === t) ? (t === 0 ? "#333" : "#F59E0B") : "rgba(255,255,255,0.06)", color: items.every(it => it.tip === t) ? (t === 0 ? "#aaa" : "#0d0b1a") : "#666", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                {t === 0 ? "Sin" : t + "%"}
+              </button>
+            ))}
+          </div>
+          {items.some(it => it.tip > 0) && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 8 }}>
+              <p style={{ color: "#666", fontSize: 11, width: "100%", margin: "0 0 4px" }}>¿Qué ítems llevan propina?</p>
+              {items.map(it => (
+                <button key={it.id} onClick={() => {
+                  setItems(prev => prev.map(x => {
+                    if (x.id !== it.id) return x;
+                    const newTip = x.tip > 0 ? 0 : (items.find(i => i.tip > 0)?.tip || 10);
+                    return { ...x, tip: newTip, total: x.price + Math.round(x.price * newTip / 100) };
+                  }));
+                }} style={{ background: it.tip > 0 ? "#F59E0B22" : "none", border: it.tip > 0 ? "1.5px solid #F59E0B" : "0.5px solid #333", borderRadius: 99, padding: "4px 12px", color: it.tip > 0 ? "#F59E0B" : "#555", fontSize: 12, fontWeight: it.tip > 0 ? 700 : 400, cursor: "pointer" }}>
+                  {it.name.split(" ").slice(0, 2).join(" ")}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Total */}
       {items.length > 0 && (
