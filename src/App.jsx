@@ -315,7 +315,7 @@ function QuickScreen({ type, contacts, cuentas, setCuentas, onSave, onBack }) {
             <div style={{ marginTop: 10 }}>
               <Card>
                 <Label>Nueva cuenta bancaria</Label>
-                {[{ label: "Nombre completo", key: "nombre", placeholder: "Felipe Andrés Acuña Aller" }, { label: "RUT", key: "rut", placeholder: "20.072.830-0" }, { label: "Tipo de cuenta", key: "tipo", type: "select", options: TIPOS }, { label: "N° cuenta", key: "numero", placeholder: "0 070 31 42664 7" }, { label: "Banco", key: "banco", type: "select", options: BANCOS }, { label: "Email (opcional)", key: "email", placeholder: "nombre@correo.cl" }].map(f => (
+                {[{ label: "Nombre completo", key: "nombre", placeholder: "Ej: Juan Pérez González" }, { label: "RUT", key: "rut", placeholder: "Ej: 12.345.678-9" }, { label: "Tipo de cuenta", key: "tipo", type: "select", options: TIPOS }, { label: "N° cuenta", key: "numero", placeholder: "Ej: 0 000 00 00000 0" }, { label: "Banco", key: "banco", type: "select", options: BANCOS }, { label: "Email (opcional)", key: "email", placeholder: "nombre@correo.cl" }].map(f => (
                   <div key={f.key} style={{ marginBottom: 8 }}>
                     <p style={{ color: "#666", fontSize: 11, margin: "0 0 4px" }}>{f.label}</p>
                     {f.type === "select" ? (
@@ -679,7 +679,7 @@ function DivisionFlow({ userName, contacts, cuentas, setCuentas, onDone, onBack 
           {showAddCuenta && (
             <Card style={{ marginTop: 10 }}>
               <Label>Nueva cuenta</Label>
-              {[{ label: "Nombre completo", key: "nombre", placeholder: "Felipe Andrés Acuña Aller" }, { label: "RUT", key: "rut", placeholder: "20.072.830-0" }, { label: "Tipo de cuenta", key: "tipo", type: "select", options: TIPOS }, { label: "N° cuenta", key: "numero", placeholder: "0 070 31 42664 7" }, { label: "Banco", key: "banco", type: "select", options: BANCOS }, { label: "Email (opcional)", key: "email", placeholder: "nombre@correo.cl" }].map(f => (
+              {[{ label: "Nombre completo", key: "nombre", placeholder: "Ej: Juan Pérez González" }, { label: "RUT", key: "rut", placeholder: "Ej: 12.345.678-9" }, { label: "Tipo de cuenta", key: "tipo", type: "select", options: TIPOS }, { label: "N° cuenta", key: "numero", placeholder: "Ej: 0 000 00 00000 0" }, { label: "Banco", key: "banco", type: "select", options: BANCOS }, { label: "Email (opcional)", key: "email", placeholder: "nombre@correo.cl" }].map(f => (
                 <div key={f.key} style={{ marginBottom: 8 }}>
                   <p style={{ color: "#666", fontSize: 11, margin: "0 0 4px" }}>{f.label}</p>
                   {f.type === "select" ? (
@@ -825,6 +825,37 @@ function ContactScreen({ contact, records, cuentas, onMarkPaid, onBack }) {
               </div>
             ))}
           </>
+        )}
+
+        {/* Consolidated WhatsApp message */}
+        {pendingRecords.length > 1 && (
+          <div style={{ marginTop: 8 }}>
+            <p style={{ color: "#555", fontSize: 10, fontWeight: 700, letterSpacing: 1, margin: "0 0 8px" }}>MENSAJE CONSOLIDADO</p>
+            <a href={(() => {
+              const total = pendingRecords.reduce((s, r) => s + Math.abs(r.amount), 0);
+              const detail = pendingRecords.map(r => {
+                const items = r.items.map(it => {
+                  const splitTxt = it.splitOf && it.splitOf > 1 ? ` (÷${it.splitOf})` : "";
+                  const tipTxt = it.tip > 0 ? ` (+${it.tip}% prop.)` : "";
+                  return `  * ${it.name}${tipTxt}${splitTxt}: ${fmt(it.total)}`;
+                }).join("\n");
+                return `📍 ${r.label || "Cobro"}\n${items}`;
+              }).join("\n\n");
+              const verb = balance > 0 ? "Me debes" : "Te debo";
+              const cuentaTxt = cuenta
+                ? `\n\nDatos para transferencia:\n${cuenta.nombre}\n${cuenta.rut}\n${cuenta.tipo}\n${cuenta.numero}\n${cuenta.banco}${cuenta.email ? "\n" + cuenta.email : ""}`
+                : "";
+              return `https://wa.me/?text=${encodeURIComponent(`Hola ${contact.name}! ${verb} $${total.toLocaleString("es-CL")} en total 🧾\n\n${detail}${cuentaTxt}`)}`;
+            })()}
+              target="_blank" rel="noreferrer"
+              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#25D36622", border: "1px solid #25D36644", borderRadius: 14, padding: "13px 16px", textDecoration: "none" }}>
+              <div>
+                <p style={{ color: "#fff", fontSize: 14, fontWeight: 700, margin: 0 }}>💬 Enviar todo junto</p>
+                <p style={{ color: "#25D366", fontSize: 11, margin: "2px 0 0" }}>{pendingRecords.length} cobros · {fmt(pendingRecords.reduce((s, r) => s + Math.abs(r.amount), 0))} total</p>
+              </div>
+              <span style={{ color: "#25D366", fontSize: 20 }}>→</span>
+            </a>
+          </div>
         )}
       </div>
     </div>
