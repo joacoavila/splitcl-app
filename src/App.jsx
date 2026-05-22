@@ -844,48 +844,52 @@ export default function SplitCL() {
   const saveContacts = (c) => { setContacts(c); save("splitcl_contacts", c); };
 
   const upsertContact = (name, colorFallback, balanceDelta, recordData) => {
-    let contactId = null;
+    // resolve contactId synchronously from current contacts state
     setContacts(prev => {
       const existing = prev.find(c => c.name.toLowerCase() === name.toLowerCase());
+      const contactId = existing ? existing.id : uid();
       let updated;
       if (existing) {
-        contactId = existing.id;
         updated = prev.map(c => {
-          if (c.name.toLowerCase() !== name.toLowerCase()) return c;
+          if (c.id !== contactId) return c;
           const newBalance = c.balance + balanceDelta;
           return { ...c, balance: newBalance, settledAt: newBalance === 0 ? Date.now() : null, pendingCount: (c.pendingCount || 0) + 1 };
         });
       } else {
-        contactId = uid();
         updated = [...prev, { id: contactId, name, color: colorFallback || COLORS[prev.length % COLORS.length], balance: balanceDelta, settledAt: balanceDelta === 0 ? Date.now() : null, pendingCount: 1 }];
       }
       save("splitcl_contacts", updated);
+      // save record here so contactId is guaranteed correct
+      if (recordData) {
+        const newRecord = { id: uid(), contactId, amount: balanceDelta, paid: false, createdAt: Date.now(), ...recordData };
+        setRecords(prevR => {
+          const updatedR = [...prevR, newRecord];
+          save("splitcl_records", updatedR);
+          return updatedR;
+        });
+      }
       return updated;
     });
-    if (recordData) {
-      const newRecord = { id: uid(), contactId: contactId || uid(), amount: balanceDelta, paid: false, createdAt: Date.now(), ...recordData };
-      setRecords(prev => { const updated = [...prev, newRecord]; save("splitcl_records", updated); return updated; });
-    }
   };
 
   const markPaid = (recordId) => {
     setRecords(prev => {
+      const record = prev.find(r => r.id === recordId);
       const updated = prev.map(r => r.id === recordId ? { ...r, paid: true, paidAt: Date.now() } : r);
       save("splitcl_records", updated);
+      if (record) {
+        setContacts(prevC => {
+          const updatedC = prevC.map(c => {
+            if (c.id !== record.contactId) return c;
+            const newBalance = c.balance - record.amount;
+            return { ...c, balance: newBalance, settledAt: newBalance === 0 ? Date.now() : null };
+          });
+          save("splitcl_contacts", updatedC);
+          return updatedC;
+        });
+      }
       return updated;
     });
-    const record = records.find(r => r.id === recordId);
-    if (record) {
-      setContacts(prev => {
-        const updated = prev.map(c => {
-          if (c.id !== record.contactId) return c;
-          const newBalance = c.balance - record.amount;
-          return { ...c, balance: newBalance, settledAt: newBalance === 0 ? Date.now() : null };
-        });
-        save("splitcl_contacts", updated);
-        return updated;
-      });
-    }
   };
 
   const handleDivisionDone = ({ people, items, localName, total }) => {
