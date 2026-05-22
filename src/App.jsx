@@ -196,7 +196,7 @@ function QuickScreen({ type, contacts, cuentas, setCuentas, onSave, onBack }) {
   const [showAddCuenta, setShowAddCuenta] = useState(false);
   const [cuentaIdx, setCuentaIdx] = useState(0);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [nuevaCuenta, setNuevaCuenta] = useState({ banco: "BancoEstado", tipo: "Cuenta Corriente", numero: "", rut: "", nombre: "" });
+  const [nuevaCuenta, setNuevaCuenta] = useState({ banco: "BancoEstado", tipo: "Cuenta Corriente", numero: "", rut: "", nombre: "", email: "" });
 
   const isDebt = type === "debt";
   const accentColor = isDebt ? "#F87171" : "#34D399";
@@ -219,7 +219,7 @@ function QuickScreen({ type, contacts, cuentas, setCuentas, onSave, onBack }) {
     const updated = [...cuentas, nuevaCuenta];
     setCuentas(updated); save("splitcl_cuentas", updated);
     setCuentaIdx(updated.length - 1); setShowAddCuenta(false);
-    setNuevaCuenta({ banco: "BancoEstado", tipo: "Cuenta Corriente", numero: "", rut: "", nombre: "" });
+    setNuevaCuenta({ banco: "BancoEstado", tipo: "Cuenta Corriente", numero: "", rut: "", nombre: "", email: "" });
   };
 
   const canSave = displayName && items.length > 0;
@@ -315,7 +315,7 @@ function QuickScreen({ type, contacts, cuentas, setCuentas, onSave, onBack }) {
             <div style={{ marginTop: 10 }}>
               <Card>
                 <Label>Nueva cuenta bancaria</Label>
-                {[{ label: "Banco", key: "banco", type: "select", options: BANCOS }, { label: "Tipo", key: "tipo", type: "select", options: TIPOS }, { label: "N° cuenta", key: "numero", placeholder: "00-000-00000-00" }, { label: "RUT", key: "rut", placeholder: "12.345.678-9" }, { label: "Nombre", key: "nombre", placeholder: "Como aparece en el banco" }].map(f => (
+                {[{ label: "Nombre completo", key: "nombre", placeholder: "Felipe Andrés Acuña Aller" }, { label: "RUT", key: "rut", placeholder: "20.072.830-0" }, { label: "Tipo de cuenta", key: "tipo", type: "select", options: TIPOS }, { label: "N° cuenta", key: "numero", placeholder: "0 070 31 42664 7" }, { label: "Banco", key: "banco", type: "select", options: BANCOS }, { label: "Email (opcional)", key: "email", placeholder: "nombre@correo.cl" }].map(f => (
                   <div key={f.key} style={{ marginBottom: 8 }}>
                     <p style={{ color: "#666", fontSize: 11, margin: "0 0 4px" }}>{f.label}</p>
                     {f.type === "select" ? (
@@ -450,7 +450,7 @@ function DivisionFlow({ userName, contacts, cuentas, setCuentas, onDone, onBack 
   const [cuentaIdx, setCuentaIdx] = useState(0);
   const [showDropdown, setShowDropdown] = useState(false);
   const [showAddCuenta, setShowAddCuenta] = useState(false);
-  const [nuevaCuenta, setNuevaCuenta] = useState({ banco: "BancoEstado", tipo: "Cuenta Corriente", numero: "", rut: "", nombre: "" });
+  const [nuevaCuenta, setNuevaCuenta] = useState({ banco: "BancoEstado", tipo: "Cuenta Corriente", numero: "", rut: "", nombre: "", email: "" });
   const personRef = useRef();
 
   const addPerson = () => {
@@ -493,10 +493,15 @@ function DivisionFlow({ userName, contacts, cuentas, setCuentas, onDone, onBack 
 
   const waLink = (person) => {
     const owes = Math.round(getOwes(person.id));
-    const detail = items.filter(it => it.claimedBy.includes(person.id))
-      .map(it => `• ${it.name}${it.tip > 0 ? ` (+${it.tip}% prop.)` : ""}: ${fmt(Math.round(it.total / it.claimedBy.length))}`).join("\n");
-    const cuentaTxt = cuenta ? `\n\nTransfiere a:\n${cuenta.banco} · ${cuenta.tipo}\nN°: ${cuenta.numero}\nRUT: ${cuenta.rut}` : "";
-    const me = people.find(p => p.isMe);
+    const detail = items.filter(it => it.claimedBy.includes(person.id)).map(it => {
+      const splitCount = it.claimedBy.length;
+      const splitTxt = splitCount > 1 ? ` (÷${splitCount})` : "";
+      const tipTxt = it.tip > 0 ? ` (+${it.tip}% prop.)` : "";
+      return `* ${it.name}${tipTxt}${splitTxt}: ${fmt(Math.round(it.total / splitCount))}`;
+    }).join("\n");
+    const cuentaTxt = cuenta
+      ? `\n\nDatos para transferencia:\n${cuenta.nombre}\n${cuenta.rut}\n${cuenta.tipo}\n${cuenta.numero}\n${cuenta.banco}${cuenta.email ? "\n" + cuenta.email : ""}`
+      : "";
     return `https://wa.me/?text=${encodeURIComponent(`Hola ${person.name}! Me debes ${fmt(owes)} de ${localName || "la cuenta"} 🧾\n${detail}${cuentaTxt}`)}`;
   };
 
@@ -674,7 +679,7 @@ function DivisionFlow({ userName, contacts, cuentas, setCuentas, onDone, onBack 
           {showAddCuenta && (
             <Card style={{ marginTop: 10 }}>
               <Label>Nueva cuenta</Label>
-              {[{ label: "Banco", key: "banco", type: "select", options: BANCOS }, { label: "Tipo", key: "tipo", type: "select", options: TIPOS }, { label: "N° cuenta", key: "numero", placeholder: "00-000-00000-00" }, { label: "RUT", key: "rut", placeholder: "12.345.678-9" }, { label: "Nombre", key: "nombre", placeholder: "Como aparece en el banco" }].map(f => (
+              {[{ label: "Nombre completo", key: "nombre", placeholder: "Felipe Andrés Acuña Aller" }, { label: "RUT", key: "rut", placeholder: "20.072.830-0" }, { label: "Tipo de cuenta", key: "tipo", type: "select", options: TIPOS }, { label: "N° cuenta", key: "numero", placeholder: "0 070 31 42664 7" }, { label: "Banco", key: "banco", type: "select", options: BANCOS }, { label: "Email (opcional)", key: "email", placeholder: "nombre@correo.cl" }].map(f => (
                 <div key={f.key} style={{ marginBottom: 8 }}>
                   <p style={{ color: "#666", fontSize: 11, margin: "0 0 4px" }}>{f.label}</p>
                   {f.type === "select" ? (
@@ -715,49 +720,187 @@ function DivisionFlow({ userName, contacts, cuentas, setCuentas, onDone, onBack 
   );
 }
 
+
+// ── Contact Screen ────────────────────────────────────────────────────────────
+function ContactScreen({ contact, records, cuentas, onMarkPaid, onBack }) {
+  const pendingRecords = records.filter(r => r.contactId === contact.id && !r.paid);
+  const paidRecords = records.filter(r => r.contactId === contact.id && r.paid);
+  const balance = pendingRecords.reduce((s, r) => s + r.amount, 0);
+  const isCredit = balance >= 0;
+  const accentColor = isCredit ? "#34D399" : "#F87171";
+  const cuenta = cuentas[0];
+
+  const timeAgo = (ts) => {
+    const diff = Date.now() - ts;
+    const days = Math.floor(diff / 86400000);
+    if (days === 0) return "hoy";
+    if (days === 1) return "ayer";
+    return `hace ${days} días`;
+  };
+
+  const waMsg = (r) => {
+    const detail = r.items.map(it => `• ${it.name}${it.tip > 0 ? ` (+${it.tip}% prop.)` : ""}: ${fmt(it.total)}`).join("\n");
+    const cuentaTxt = cuenta ? `\n\nTransfiere a:\n${cuenta.banco} · ${cuenta.tipo}\nN°: ${cuenta.numero}\nRUT: ${cuenta.rut}` : "";
+    const verb = r.type === "debt" ? "Te debo" : "Me debes";
+    return `https://wa.me/?text=${encodeURIComponent(`Hola ${contact.name}! ${verb} ${fmt(Math.abs(r.amount))} 🧾\n${detail}${cuentaTxt}`)}`;
+  };
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflowY: "auto" }}>
+      {/* Header */}
+      <div style={{ background: isCredit ? "linear-gradient(135deg,#0f2a1a,#0a1f14)" : "linear-gradient(135deg,#2a0f0f,#1f0a0a)", padding: "20px 24px", borderBottom: `0.5px solid ${accentColor}22` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+          <Avatar name={contact.name} color={contact.color} size={48} />
+          <div style={{ flex: 1 }}>
+            <p style={{ color: "#fff", fontSize: 20, fontWeight: 900, margin: 0, letterSpacing: -0.5 }}>{contact.name}</p>
+            <p style={{ color: "#555", fontSize: 12, margin: "2px 0 0" }}>{pendingRecords.length} cobro{pendingRecords.length !== 1 ? "s" : ""} pendiente{pendingRecords.length !== 1 ? "s" : ""}</p>
+          </div>
+        </div>
+        <div style={{ background: "rgba(0,0,0,0.3)", borderRadius: 12, padding: "12px 16px", textAlign: "center" }}>
+          <p style={{ color: accentColor, fontSize: 28, fontWeight: 900, margin: "0 0 2px", letterSpacing: -1 }}>
+            {balance > 0 ? "+" : ""}{fmt(balance)}
+          </p>
+          <p style={{ color: isCredit ? "#1a6b46" : "#6b1a1a", fontSize: 12, margin: 0 }}>
+            {balance > 0 ? "te debe en total" : balance < 0 ? "le debes en total" : "saldado ✓"}
+          </p>
+        </div>
+      </div>
+
+      {/* Records */}
+      <div style={{ padding: "16px 24px", display: "flex", flexDirection: "column", gap: 10 }}>
+        {pendingRecords.length === 0 && paidRecords.length === 0 && (
+          <div style={{ textAlign: "center", padding: "40px 0", opacity: 0.4 }}>
+            <p style={{ fontSize: 32 }}>💸</p>
+            <p style={{ color: "#555", fontSize: 14 }}>Sin registros aún</p>
+          </div>
+        )}
+
+        {pendingRecords.map(r => (
+          <div key={r.id} style={{ background: "#1a1730", borderRadius: 14, border: `0.5px solid ${r.amount > 0 ? "#34D39933" : "#F8717133"}`, overflow: "hidden" }}>
+            <div style={{ padding: "12px 14px", borderBottom: "0.5px solid #1f1c35" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                <div>
+                  <p style={{ color: "#fff", fontSize: 14, fontWeight: 700, margin: 0 }}>{r.label || "Cobro"}</p>
+                  <p style={{ color: "#555", fontSize: 11, margin: "3px 0 0" }}>{timeAgo(r.createdAt)} · {r.items.length} ítem{r.items.length !== 1 ? "s" : ""}</p>
+                </div>
+                <span style={{ color: r.amount > 0 ? "#34D399" : "#F87171", fontSize: 16, fontWeight: 900 }}>{r.amount > 0 ? "+" : ""}{fmt(r.amount)}</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {r.items.map((it, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: it.tip > 0 ? "#F59E0B" : "#666", fontSize: 11 }}>
+                      • {it.name}{it.tip > 0 ? <span style={{ background: "#F59E0B22", borderRadius: 99, padding: "0 5px", fontSize: 9, marginLeft: 4 }}>+{it.tip}%</span> : ""}
+                    </span>
+                    <span style={{ color: it.tip > 0 ? "#F59E0B" : "#666", fontSize: 11 }}>{fmt(it.total)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: "flex" }}>
+              <a href={waMsg(r)} target="_blank" rel="noreferrer"
+                style={{ flex: 1, background: "none", border: "none", borderRight: "0.5px solid #2d2650", padding: "10px", color: "#A78BFA", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "center", textDecoration: "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+                💬 Reenviar
+              </a>
+              <button onClick={() => onMarkPaid(r.id)}
+                style={{ flex: 1, background: "none", border: "none", padding: "10px", color: "#34D399", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                ✓ Pagado
+              </button>
+            </div>
+          </div>
+        ))}
+
+        {/* Paid records */}
+        {paidRecords.length > 0 && (
+          <>
+            <p style={{ color: "#444", fontSize: 10, fontWeight: 700, letterSpacing: 1, margin: "6px 0 0" }}>PAGADOS</p>
+            {paidRecords.map(r => (
+              <div key={r.id} style={{ background: "#15152a", borderRadius: 12, border: "0.5px solid #2d2650", padding: "11px 14px", opacity: 0.5 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <p style={{ color: "#666", fontSize: 13, fontWeight: 700, margin: 0 }}>{r.label || "Cobro"}</p>
+                    <p style={{ color: "#444", fontSize: 11, margin: "2px 0 0" }}>{timeAgo(r.createdAt)} · pagado ✓</p>
+                  </div>
+                  <span style={{ color: "#555", fontSize: 14, fontWeight: 700, textDecoration: "line-through" }}>{fmt(Math.abs(r.amount))}</span>
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function SplitCL() {
   const [userName, setUserName] = useState(() => load("splitcl_name", ""));
   const [contacts, setContacts] = useState(() => purgeContacts(load("splitcl_contacts", [])));
+  const [records, setRecords] = useState(() => load("splitcl_records", []));
   const [cuentas, setCuentas] = useState(() => load("splitcl_cuentas", []));
-  const [screen, setScreen] = useState("home"); // home | division | quick | contact
+  const [screen, setScreen] = useState("home");
   const [quickType, setQuickType] = useState("credit");
   const [activeContact, setActiveContact] = useState(null);
 
   const saveContacts = (c) => { setContacts(c); save("splitcl_contacts", c); };
 
-  const upsertContact = (name, colorFallback, balanceDelta) => {
+  const upsertContact = (name, colorFallback, balanceDelta, recordData) => {
+    let contactId = null;
     setContacts(prev => {
       const existing = prev.find(c => c.name.toLowerCase() === name.toLowerCase());
       let updated;
       if (existing) {
+        contactId = existing.id;
         updated = prev.map(c => {
           if (c.name.toLowerCase() !== name.toLowerCase()) return c;
           const newBalance = c.balance + balanceDelta;
           return { ...c, balance: newBalance, settledAt: newBalance === 0 ? Date.now() : null, pendingCount: (c.pendingCount || 0) + 1 };
         });
       } else {
-        updated = [...prev, { id: uid(), name, color: colorFallback || COLORS[contacts.length % COLORS.length], balance: balanceDelta, settledAt: balanceDelta === 0 ? Date.now() : null, pendingCount: 1 }];
+        contactId = uid();
+        updated = [...prev, { id: contactId, name, color: colorFallback || COLORS[prev.length % COLORS.length], balance: balanceDelta, settledAt: balanceDelta === 0 ? Date.now() : null, pendingCount: 1 }];
       }
       save("splitcl_contacts", updated);
       return updated;
     });
+    if (recordData) {
+      const newRecord = { id: uid(), contactId: contactId || uid(), amount: balanceDelta, paid: false, createdAt: Date.now(), ...recordData };
+      setRecords(prev => { const updated = [...prev, newRecord]; save("splitcl_records", updated); return updated; });
+    }
+  };
+
+  const markPaid = (recordId) => {
+    setRecords(prev => {
+      const updated = prev.map(r => r.id === recordId ? { ...r, paid: true, paidAt: Date.now() } : r);
+      save("splitcl_records", updated);
+      return updated;
+    });
+    const record = records.find(r => r.id === recordId);
+    if (record) {
+      setContacts(prev => {
+        const updated = prev.map(c => {
+          if (c.id !== record.contactId) return c;
+          const newBalance = c.balance - record.amount;
+          return { ...c, balance: newBalance, settledAt: newBalance === 0 ? Date.now() : null };
+        });
+        save("splitcl_contacts", updated);
+        return updated;
+      });
+    }
   };
 
   const handleDivisionDone = ({ people, items, localName, total }) => {
     people.filter(p => !p.isMe).forEach(p => {
-      const owes = Math.round(items.reduce((s, it) => {
-        if (!it.claimedBy.includes(p.id)) return s;
-        return s + it.total / it.claimedBy.length;
-      }, 0));
-      if (owes > 0) upsertContact(p.name, p.color, owes);
+      const personItems = items.filter(it => it.claimedBy.includes(p.id)).map(it => ({ ...it, total: Math.round(it.total / it.claimedBy.length), splitOf: it.claimedBy.length }));
+      const owes = personItems.reduce((s, it) => s + it.total, 0);
+      if (owes > 0) upsertContact(p.name, p.color, owes, { type: "credit", label: localName || "División", items: personItems });
     });
     setScreen("home");
   };
 
   const handleQuickSave = ({ type, personName, selectedContact, items, total }) => {
     const delta = type === "debt" ? -total : total;
-    upsertContact(personName, selectedContact?.color || null, delta);
+    const label = items.length > 0 ? items[0].name : (type === "debt" ? "Deuda" : "Cobro");
+    upsertContact(personName, selectedContact?.color || null, delta, { type, label, items });
     setScreen("home");
   };
 
@@ -776,9 +919,10 @@ export default function SplitCL() {
         </div>
       )}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        {screen === "home" && <HomeScreen userName={userName} contacts={contacts} onNew={() => setScreen("division")} onQuick={(t) => { setQuickType(t); setScreen("quick"); }} onContactTap={(c) => { setActiveContact(c); }} />}
+        {screen === "home" && <HomeScreen userName={userName} contacts={contacts} onNew={() => setScreen("division")} onQuick={(t) => { setQuickType(t); setScreen("quick"); }} onContactTap={(c) => { setActiveContact(c); setScreen("contact"); }} />}
         {screen === "division" && <DivisionFlow userName={userName} contacts={contacts} cuentas={cuentas} setCuentas={setCuentas} onDone={handleDivisionDone} onBack={() => setScreen("home")} />}
         {screen === "quick" && <QuickScreen type={quickType} contacts={contacts} cuentas={cuentas} setCuentas={setCuentas} onSave={handleQuickSave} onBack={() => setScreen("home")} />}
+        {screen === "contact" && activeContact && <ContactScreen contact={contacts.find(c => c.id === activeContact.id) || activeContact} records={records} cuentas={cuentas} onMarkPaid={markPaid} onBack={() => setScreen("home")} />}
       </div>
     </Wrapper>
   );
